@@ -52,3 +52,7 @@ application-my.yaml
 
 /yudao-ui-app/unpackage/
 **/.DS_Store
+.m2/
+.claude/
+.codex/
+.DS_Store
