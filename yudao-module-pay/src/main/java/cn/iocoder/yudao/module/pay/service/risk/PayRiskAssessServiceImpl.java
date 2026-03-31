@@ -1,8 +1,12 @@
 package cn.iocoder.yudao.module.pay.service.risk;
 
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
+import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
+import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
@@ -26,6 +30,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Resource
     private DeepSeekClient deepSeekClient;
+
+    @Resource
+    private PayRiskAssessRecordMapper payRiskAssessRecordMapper;
 
     @Override
     public AppPayRiskAssessRespVO assess(@Valid AppPayRiskAssessReqVO reqVO) {
@@ -59,7 +66,41 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setDeepAnalysis(aiResp.getDeepAnalysis());
         respVO.setRiskFactors(aiResp.getRiskFactors());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
+
+        saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
         return respVO;
+    }
+
+    @Override
+    public PageResult<PayRiskAssessRecordDO> getRiskAssessRecordPage(PayRiskAssessRecordPageReqVO pageReqVO) {
+        return payRiskAssessRecordMapper.selectPage(pageReqVO);
+    }
+
+    private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
+                                  AppPayRiskAssessRespVO respVO) {
+        JsonNode paymentData = reqVO.getPaymentData();
+        PayRiskAssessRecordDO record = new PayRiskAssessRecordDO();
+        record.setScene(readText(paymentData, "scene"));
+        record.setSource(readText(paymentData, "source"));
+        record.setIp(ip);
+        record.setRiskScore(respVO.getRiskScore());
+        record.setRiskLevel(respVO.getRiskLevel());
+        record.setDeepAnalysis(respVO.getDeepAnalysis());
+        record.setRiskFactorsJson(JsonUtils.toJsonString(respVO.getRiskFactors()));
+        record.setPaymentDataJson(JsonUtils.toJsonString(paymentData));
+        record.setIpInfoJson(JsonUtils.toJsonString(ipInfoMaskedJsonNode));
+        payRiskAssessRecordMapper.insert(record);
+    }
+
+    private String readText(JsonNode jsonNode, String fieldName) {
+        if (jsonNode == null) {
+            return null;
+        }
+        JsonNode fieldNode = jsonNode.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return null;
+        }
+        return fieldNode.asText();
     }
 }
 

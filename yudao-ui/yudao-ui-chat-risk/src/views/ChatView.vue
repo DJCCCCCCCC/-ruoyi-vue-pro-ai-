@@ -154,6 +154,17 @@ const extractLinks = (messages: ChatMessage[]) => {
   return messages.flatMap((message) => message.content.match(urlPattern) || [])
 }
 
+const extractFirstIp = (messages: ChatMessage[]) => {
+  const ipPattern = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
+  for (const message of messages) {
+    const match = message.content.match(ipPattern)
+    if (match?.[0]) {
+      return match[0]
+    }
+  }
+  return ''
+}
+
 const riskSignalPatterns = [
   { label: '链接', pattern: /https?:\/\/|www\./i },
   { label: '二维码', pattern: /二维码|扫码|扫一扫/i },
@@ -176,8 +187,10 @@ const buildAnalysisPayload = () => {
   const links = extractLinks(chatStore.messages)
   const latestPeerMessage = [...chatStore.messages].reverse().find((message) => message.type === 'peer')
   const detectedSignals = getRiskSignals(chatStore.messages)
+  const detectedIp = extractFirstIp(chatStore.messages)
 
   return {
+    ip: detectedIp || '8.8.8.8',
     paymentData: {
       scene: 'WECHAT_CHAT_RISK',
       source: 'chat-risk-test-page',
@@ -253,7 +266,9 @@ const handleClear = () => {
   }
 }
 
-restoreDefaultPreset()
+if (chatStore.messages.length === 0) {
+  restoreDefaultPreset()
+}
 </script>
 
 <style scoped>
