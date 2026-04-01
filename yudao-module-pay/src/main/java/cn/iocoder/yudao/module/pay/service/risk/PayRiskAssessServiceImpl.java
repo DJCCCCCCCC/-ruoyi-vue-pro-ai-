@@ -1,7 +1,7 @@
 package cn.iocoder.yudao.module.pay.service.risk;
 
-import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
@@ -10,14 +10,21 @@ import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
+import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import javax.validation.Valid;
 import javax.annotation.Resource;
+import javax.validation.Valid;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 
@@ -30,6 +37,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Resource
     private DeepSeekClient deepSeekClient;
+
+    @Resource
+    private WhoisXmlApiClient whoisXmlApiClient;
 
     @Resource
     private PayRiskAssessRecordMapper payRiskAssessRecordMapper;
@@ -46,25 +56,34 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_IP_MISSING);
         }
 
-        // 1）ipinfo 获取 IP 信息（用于后续让 AI 判断风险）
         JsonNode ipInfo = ipInfoClient.fetchIpInfo(ip);
-
-        // 2）脱敏：对支付 JSON + ipinfo JSON 做递归脱敏，避免把敏感数据发给 AI
         JsonNode paymentMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(paymentData);
         JsonNode ipInfoMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(ipInfo);
 
         String paymentMaskedJson = JsonUtils.toJsonString(paymentMaskedJsonNode);
         String ipInfoMaskedJson = JsonUtils.toJsonString(ipInfoMaskedJsonNode);
 
-        // 3）调用 DeepSeek 做风控评估，并解析出结构化 JSON
         PayRiskAssessAiResponse aiResp = deepSeekClient.assess(paymentMaskedJson, ipInfoMaskedJson);
 
-        // 4）返回给前端
+        PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = PayRiskLinkAnalyzer.analyze(paymentData);
+        PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = assessWhoisRisk(paymentData);
+
+        PayRiskAssessAiResponse mergedResp = mergeExternalRisk(aiResp,
+                linkRiskAssessment.getExtraScore(),
+                linkRiskAssessment.getFactors(),
+                linkRiskAssessment.getNotes(),
+                "Link intelligence");
+        mergedResp = mergeExternalRisk(mergedResp,
+                whoisRiskAssessment.getExtraScore(),
+                whoisRiskAssessment.getFactors(),
+                whoisRiskAssessment.getNotes(),
+                "Whois intelligence");
+
         AppPayRiskAssessRespVO respVO = new AppPayRiskAssessRespVO();
-        respVO.setRiskScore(aiResp.getRiskScore());
-        respVO.setRiskLevel(aiResp.getRiskLevel());
-        respVO.setDeepAnalysis(aiResp.getDeepAnalysis());
-        respVO.setRiskFactors(aiResp.getRiskFactors());
+        respVO.setRiskScore(mergedResp.getRiskScore());
+        respVO.setRiskLevel(mergedResp.getRiskLevel());
+        respVO.setDeepAnalysis(mergedResp.getDeepAnalysis());
+        respVO.setRiskFactors(mergedResp.getRiskFactors());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
 
         saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
@@ -74,6 +93,19 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Override
     public PageResult<PayRiskAssessRecordDO> getRiskAssessRecordPage(PayRiskAssessRecordPageReqVO pageReqVO) {
         return payRiskAssessRecordMapper.selectPage(pageReqVO);
+    }
+
+    private PayRiskWhoisAnalyzer.WhoisRiskAssessment assessWhoisRisk(JsonNode paymentData) {
+        List<String> domains = PayRiskWhoisAnalyzer.extractDomains(paymentData);
+        if (domains.isEmpty()) {
+            return PayRiskWhoisAnalyzer.WhoisRiskAssessment.empty();
+        }
+
+        List<PayRiskWhoisAnalyzer.WhoisLookupResult> lookupResults = new ArrayList<>();
+        for (String domain : domains) {
+            lookupResults.add(new PayRiskWhoisAnalyzer.WhoisLookupResult(domain, whoisXmlApiClient.lookupDomain(domain)));
+        }
+        return PayRiskWhoisAnalyzer.analyze(lookupResults);
     }
 
     private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
@@ -92,6 +124,82 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         payRiskAssessRecordMapper.insert(record);
     }
 
+    private PayRiskAssessAiResponse mergeExternalRisk(PayRiskAssessAiResponse baseResp,
+                                                      Integer extraScore,
+                                                      List<String> extraFactors,
+                                                      List<String> extraNotes,
+                                                      String sourceLabel) {
+        if (baseResp == null || extraScore == null || extraScore <= 0) {
+            return baseResp;
+        }
+
+        int baseScore = baseResp.getRiskScore() == null ? 0 : baseResp.getRiskScore();
+        int finalScore = Math.min(100, baseScore + extraScore);
+        String finalRiskLevel = maxRiskLevel(baseResp.getRiskLevel(), resolveRiskLevel(finalScore));
+
+        Set<String> mergedFactors = new LinkedHashSet<>();
+        if (baseResp.getRiskFactors() != null) {
+            mergedFactors.addAll(baseResp.getRiskFactors());
+        }
+        if (extraFactors != null) {
+            mergedFactors.addAll(extraFactors);
+        }
+
+        StringBuilder deepAnalysis = new StringBuilder(baseResp.getDeepAnalysis() == null
+                ? ""
+                : baseResp.getDeepAnalysis().trim());
+        if (extraNotes != null && !extraNotes.isEmpty()) {
+            if (deepAnalysis.length() > 0) {
+                deepAnalysis.append("\n\n");
+            }
+            deepAnalysis.append(sourceLabel)
+                    .append(" added ")
+                    .append(extraScore)
+                    .append(" points: ")
+                    .append(String.join("; ", extraNotes));
+        }
+
+        PayRiskAssessAiResponse mergedResp = new PayRiskAssessAiResponse();
+        mergedResp.setRiskScore(finalScore);
+        mergedResp.setRiskLevel(finalRiskLevel);
+        mergedResp.setDeepAnalysis(deepAnalysis.toString());
+        mergedResp.setRiskFactors(new ArrayList<>(mergedFactors));
+        return mergedResp;
+    }
+
+    private String resolveRiskLevel(int riskScore) {
+        if (riskScore >= 85) {
+            return "CRITICAL";
+        }
+        if (riskScore >= 65) {
+            return "HIGH";
+        }
+        if (riskScore >= 35) {
+            return "MEDIUM";
+        }
+        return "LOW";
+    }
+
+    private String maxRiskLevel(String left, String right) {
+        return riskLevelWeight(left) >= riskLevelWeight(right) ? left : right;
+    }
+
+    private int riskLevelWeight(String riskLevel) {
+        if ("CRITICAL".equalsIgnoreCase(riskLevel)) {
+            return 4;
+        }
+        if ("HIGH".equalsIgnoreCase(riskLevel)) {
+            return 3;
+        }
+        if ("MEDIUM".equalsIgnoreCase(riskLevel)) {
+            return 2;
+        }
+        if ("LOW".equalsIgnoreCase(riskLevel)) {
+            return 1;
+        }
+        return 0;
+    }
+
     private String readText(JsonNode jsonNode, String fieldName) {
         if (jsonNode == null) {
             return null;
@@ -103,4 +211,3 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return fieldNode.asText();
     }
 }
-
