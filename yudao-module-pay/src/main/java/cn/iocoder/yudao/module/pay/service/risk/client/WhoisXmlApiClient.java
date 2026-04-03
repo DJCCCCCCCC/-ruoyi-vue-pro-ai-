@@ -26,27 +26,44 @@ public class WhoisXmlApiClient {
 
     public JsonNode lookupDomain(String domain) {
         if (domain == null || domain.trim().isEmpty()) {
-            return null;
+            return buildErrorPayload("domain is empty");
         }
         if (apiKey == null || apiKey.trim().isEmpty()) {
             log.warn("[WhoisXmlApiClient][lookupDomain] apiKey is empty, skip lookup for domain={}", domain);
-            return null;
+            return buildErrorPayload("whoisxml apiKey is empty");
         }
 
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("apiKey", apiKey);
-        requestBody.put("domainName", domain);
-        requestBody.put("outputFormat", "JSON");
+        Map<String, Object> queryParams = new HashMap<>();
+        queryParams.put("apiKey", apiKey);
+        queryParams.put("domainName", domain);
+        queryParams.put("outputFormat", "JSON");
 
-        try (HttpResponse response = HttpUtil.createPost(baseUrl)
-                .header("Content-Type", "application/json")
+        try (HttpResponse response = HttpUtil.createGet(baseUrl)
                 .timeout(timeoutMillis)
-                .body(JsonUtils.toJsonString(requestBody))
+                .form(queryParams)
                 .execute()) {
-            return JsonUtils.parseTree(response.body());
+            String body = response.body();
+            if (response.getStatus() >= 400) {
+                log.warn("[WhoisXmlApiClient][lookupDomain] http status={} domain={} body={}",
+                        response.getStatus(), domain, body);
+                return buildErrorPayload("http status " + response.getStatus() + ", body: " + body);
+            }
+            JsonNode payload = JsonUtils.parseTree(body);
+            return payload == null ? buildErrorPayload("response body is not valid json") : payload;
         } catch (Exception e) {
             log.warn("[WhoisXmlApiClient][lookupDomain] lookup failed for domain={}", domain, e);
-            return null;
+            return buildErrorPayload(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    private JsonNode buildErrorPayload(String msg) {
+        return JsonUtils.parseTree("{\"ErrorMessage\":{\"msg\":\"" + safe(msg) + "\"}}");
+    }
+
+    private String safe(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

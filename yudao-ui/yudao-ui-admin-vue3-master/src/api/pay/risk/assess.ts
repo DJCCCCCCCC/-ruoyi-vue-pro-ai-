@@ -17,6 +17,7 @@ export interface PayRiskAssessRespVO {
   deepAnalysis: string
   riskFactors?: string[]
   ipInfo?: any
+  whoisInfo?: any
 }
 
 export interface PayRiskAssessRecordVO {
@@ -69,4 +70,14 @@ export const assessPayRisk = async (data: PayRiskAssessReqVO) => {
 export const getPayRiskAssessRecordPage = async (params: PayRiskAssessRecordPageReqVO) => {
   const resp = await axios.get(`${API_PREFIX}/pay/risk/page`, { params })
   return unwrapPageResult(resp?.data)
+}
+
+export const deletePayRiskAssessRecord = async (id: number) => {
+  const resp = await axios.post(`${API_PREFIX}/pay/risk/delete`, undefined, { params: { id } })
+  return resp?.data?.data ?? resp?.data ?? resp
+}
+
+export const clearPayRiskAssessRecords = async () => {
+  const resp = await axios.post(`${API_PREFIX}/pay/risk/clear`)
+  return resp?.data?.data ?? resp?.data ?? resp
 }

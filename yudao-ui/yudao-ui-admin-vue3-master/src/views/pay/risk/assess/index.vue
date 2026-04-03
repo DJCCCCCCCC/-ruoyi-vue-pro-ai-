@@ -73,14 +73,26 @@
     </div>
 
     <ContentWrap class="panel table-panel">
-      <template #header>
-        <div class="table-header">
+      <div class="table-header">
+        <div class="table-title">
           <h3>分析记录</h3>
           <span>最新记录优先显示</span>
         </div>
-      </template>
+        <el-button
+          type="danger"
+          :loading="clearing"
+          :disabled="recordTotal === 0"
+          @click="handleClearRecords"
+        >
+          一键清空
+        </el-button>
+      </div>
       <el-table v-loading="recordLoading" :data="recordList" :stripe="true" size="small">
-        <el-table-column label="ID" prop="id" width="90" />
+        <el-table-column label="序号" width="90">
+          <template #default="scope">
+            {{ recordTotal - ((recordQuery.pageNo - 1) * recordQuery.pageSize + scope.$index) }}
+          </template>
+        </el-table-column>
         <el-table-column label="创建时间" prop="createTime" width="170" :formatter="dateFormatter" />
         <el-table-column label="场景" prop="scene" min-width="150" />
         <el-table-column label="来源" prop="source" min-width="150" />
@@ -91,9 +103,10 @@
           </template>
         </el-table-column>
         <el-table-column label="分数" prop="riskScore" width="90" />
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="handleUseRecord(scope.row)">使用</el-button>
+            <el-button link type="danger" @click="handleDeleteRecord(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -114,6 +127,8 @@ import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import {
   assessPayRisk,
+  clearPayRiskAssessRecords,
+  deletePayRiskAssessRecord,
   getPayRiskAssessRecordPage,
   type PayRiskAssessRecordVO,
   type PayRiskAssessReqVO,
@@ -125,6 +140,7 @@ defineOptions({ name: 'PayRiskAssess' })
 const message = useMessage()
 const submitting = ref(false)
 const recordLoading = ref(false)
+const clearing = ref(false)
 const recordTotal = ref(0)
 const recordList = ref<PayRiskAssessRecordVO[]>([])
 const recordQuery = reactive({
@@ -231,6 +247,25 @@ const refreshRecordList = async () => {
   await getRecordList()
 }
 
+const handleClearRecords = async () => {
+  try {
+    await message.delConfirm('确认一键清空全部风险评估记录？该操作不可恢复。')
+  } catch {
+    return
+  }
+  clearing.value = true
+  try {
+    await clearPayRiskAssessRecords()
+    result.value = null
+    await refreshRecordList()
+    message.success('已一键清空')
+  } catch (error: any) {
+    message.error(error?.message || '一键清空失败')
+  } finally {
+    clearing.value = false
+  }
+}
+
 const handleUseRecord = (record: PayRiskAssessRecordVO) => {
   form.ip = record.ip || ''
   form.paymentDataJson = JSON.stringify(parseJsonText(record.paymentDataJson, {}), null, 2)
@@ -243,6 +278,23 @@ const handleUseRecord = (record: PayRiskAssessRecordVO) => {
   }
 }
 
+
+const handleDeleteRecord = async (record: PayRiskAssessRecordVO) => {
+  try {
+    await message.delConfirm(`确认删除记录 #${record.id} 吗？`)
+  } catch {
+    return
+  }
+  try {
+    await deletePayRiskAssessRecord(record.id)
+    recordList.value = recordList.value.filter((item) => item.id !== record.id)
+    recordTotal.value = Math.max(0, recordTotal.value - 1)
+    await refreshRecordList()
+    message.success('记录已删除')
+  } catch (error: any) {
+    message.error(error?.message || '删除记录失败')
+  }
+}
 const handleAssess = async () => {
   let paymentData: Record<string, unknown>
   try {
@@ -461,8 +513,15 @@ onActivated(async () => {
 
 .table-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.table-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .table-header h3 {

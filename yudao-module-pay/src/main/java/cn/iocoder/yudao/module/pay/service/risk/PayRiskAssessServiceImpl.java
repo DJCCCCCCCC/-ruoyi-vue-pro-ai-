@@ -16,6 +16,8 @@ import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -66,7 +68,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         PayRiskAssessAiResponse aiResp = deepSeekClient.assess(paymentMaskedJson, ipInfoMaskedJson);
 
         PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = PayRiskLinkAnalyzer.analyze(paymentData);
-        PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = assessWhoisRisk(paymentData);
+        WhoisAssessBundle whoisAssessBundle = assessWhoisRisk(paymentData);
+        PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = whoisAssessBundle.getAssessment();
 
         PayRiskAssessAiResponse mergedResp = mergeExternalRisk(aiResp,
                 linkRiskAssessment.getExtraScore(),
@@ -85,6 +88,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setDeepAnalysis(mergedResp.getDeepAnalysis());
         respVO.setRiskFactors(mergedResp.getRiskFactors());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
+        respVO.setWhoisInfo(buildWhoisInfo(whoisAssessBundle));
 
         saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
         return respVO;
@@ -95,17 +99,47 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return payRiskAssessRecordMapper.selectPage(pageReqVO);
     }
 
-    private PayRiskWhoisAnalyzer.WhoisRiskAssessment assessWhoisRisk(JsonNode paymentData) {
+    @Override
+    public void deleteRiskAssessRecord(Long id) {
+        payRiskAssessRecordMapper.deleteByIdPhysically(id);
+    }
+
+    @Override
+    public void clearRiskAssessRecords() {
+        payRiskAssessRecordMapper.deleteAllPhysically();
+    }
+
+    private WhoisAssessBundle assessWhoisRisk(JsonNode paymentData) {
         List<String> domains = PayRiskWhoisAnalyzer.extractDomains(paymentData);
         if (domains.isEmpty()) {
-            return PayRiskWhoisAnalyzer.WhoisRiskAssessment.empty();
+            return new WhoisAssessBundle(PayRiskWhoisAnalyzer.WhoisRiskAssessment.empty(), new ArrayList<>());
         }
 
         List<PayRiskWhoisAnalyzer.WhoisLookupResult> lookupResults = new ArrayList<>();
         for (String domain : domains) {
             lookupResults.add(new PayRiskWhoisAnalyzer.WhoisLookupResult(domain, whoisXmlApiClient.lookupDomain(domain)));
         }
-        return PayRiskWhoisAnalyzer.analyze(lookupResults);
+        return new WhoisAssessBundle(PayRiskWhoisAnalyzer.analyze(lookupResults), lookupResults);
+    }
+
+    private JsonNode buildWhoisInfo(WhoisAssessBundle bundle) {
+        ObjectNode root = JsonUtils.parseObject("{}", ObjectNode.class);
+        if (bundle == null || bundle.getAssessment() == null) {
+            return root;
+        }
+        root.put("extraScore", bundle.getAssessment().getExtraScore() == null ? 0 : bundle.getAssessment().getExtraScore());
+        root.putPOJO("factors", bundle.getAssessment().getFactors());
+        root.putPOJO("notes", bundle.getAssessment().getNotes());
+
+        ArrayNode records = root.putArray("records");
+        if (bundle.getLookupResults() != null) {
+            for (PayRiskWhoisAnalyzer.WhoisLookupResult lookupResult : bundle.getLookupResults()) {
+                ObjectNode item = records.addObject();
+                item.put("domain", lookupResult.getDomain());
+                item.set("payload", lookupResult.getPayload());
+            }
+        }
+        return root;
     }
 
     private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
@@ -209,5 +243,24 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             return null;
         }
         return fieldNode.asText();
+    }
+
+    private static class WhoisAssessBundle {
+        private final PayRiskWhoisAnalyzer.WhoisRiskAssessment assessment;
+        private final List<PayRiskWhoisAnalyzer.WhoisLookupResult> lookupResults;
+
+        private WhoisAssessBundle(PayRiskWhoisAnalyzer.WhoisRiskAssessment assessment,
+                                  List<PayRiskWhoisAnalyzer.WhoisLookupResult> lookupResults) {
+            this.assessment = assessment;
+            this.lookupResults = lookupResults;
+        }
+
+        private PayRiskWhoisAnalyzer.WhoisRiskAssessment getAssessment() {
+            return assessment;
+        }
+
+        private List<PayRiskWhoisAnalyzer.WhoisLookupResult> getLookupResults() {
+            return lookupResults;
+        }
     }
 }

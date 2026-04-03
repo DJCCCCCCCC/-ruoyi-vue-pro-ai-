@@ -29,6 +29,7 @@ public class PayRiskWhoisAnalyzer {
     private static final Pattern EMAIL_PATTERN = Pattern.compile("[A-Z0-9._%+-]+@([A-Z0-9.-]+\\.[A-Z]{2,})", Pattern.CASE_INSENSITIVE);
     private static final Pattern DOMAIN_PATTERN = Pattern.compile("(?:^|[^A-Z0-9-])([A-Z0-9-]+(?:\\.[A-Z0-9-]+)+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern IPV4_PATTERN = Pattern.compile("^(\\d{1,3})(?:\\.(\\d{1,3})){3}$");
+    private static final Pattern ALPHA_TLD_PATTERN = Pattern.compile("^[a-z]{2,24}$");
     private static final int MAX_DOMAIN_LOOKUPS = 3;
 
     public static List<String> extractDomains(JsonNode paymentData) {
@@ -170,8 +171,6 @@ public class PayRiskWhoisAnalyzer {
             tryAddDomain(emailMatcher.group(1), domains);
         }
 
-        tryAddDomain(text, domains);
-
         Matcher domainMatcher = DOMAIN_PATTERN.matcher(text);
         while (domainMatcher.find()) {
             tryAddDomain(domainMatcher.group(1), domains);
@@ -220,7 +219,59 @@ public class PayRiskWhoisAnalyzer {
         if (!domain.contains(".")) {
             return null;
         }
-        return domain;
+        if (!isDomainShapeValid(domain)) {
+            return null;
+        }
+        return toRegistrableDomain(domain);
+    }
+
+    private static boolean isDomainShapeValid(String domain) {
+        if (domain.startsWith(".") || domain.endsWith(".") || domain.contains("..")) {
+            return false;
+        }
+        String[] labels = domain.split("\\.");
+        if (labels.length < 2) {
+            return false;
+        }
+        String tld = labels[labels.length - 1];
+        if (!ALPHA_TLD_PATTERN.matcher(tld).matches()) {
+            return false;
+        }
+        for (String label : labels) {
+            if (label.isEmpty() || label.length() > 63) {
+                return false;
+            }
+            if (label.startsWith("-") || label.endsWith("-")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String toRegistrableDomain(String domain) {
+        String[] labels = domain.split("\\.");
+        if (labels.length <= 2) {
+            return domain;
+        }
+        String suffix2 = labels[labels.length - 2] + "." + labels[labels.length - 1];
+        if (isMultiPartPublicSuffix(suffix2) && labels.length >= 3) {
+            return labels[labels.length - 3] + "." + suffix2;
+        }
+        return labels[labels.length - 2] + "." + labels[labels.length - 1];
+    }
+
+    private static boolean isMultiPartPublicSuffix(String suffix2) {
+        return "com.cn".equals(suffix2)
+                || "net.cn".equals(suffix2)
+                || "org.cn".equals(suffix2)
+                || "gov.cn".equals(suffix2)
+                || "edu.cn".equals(suffix2)
+                || "co.uk".equals(suffix2)
+                || "org.uk".equals(suffix2)
+                || "ac.uk".equals(suffix2)
+                || "com.au".equals(suffix2)
+                || "net.au".equals(suffix2)
+                || "org.au".equals(suffix2);
     }
 
     private static boolean isIpv4(String host) {

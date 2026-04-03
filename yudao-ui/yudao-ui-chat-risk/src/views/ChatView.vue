@@ -1,8 +1,5 @@
 <template>
   <div class="chat-page">
-    <div class="ambient ambient-left"></div>
-    <div class="ambient ambient-right"></div>
-
     <section class="wechat-shell">
       <header class="wechat-header">
         <div class="header-main">
@@ -24,7 +21,7 @@
 
         <section v-if="chatStore.messages.length === 0" class="welcome-card">
           <h3>这里不是和风控助手对话，而是模拟你和对方的正常聊天。</h3>
-          <p>对方可以发付款链接、退款通知、催促转账等内容；分析结果会去后台前端显示。</p>
+          <p>对方可以发付款链接、退款通知、催促转账等内容；分析结果会提交到后台风控接口。</p>
           <div class="welcome-actions">
             <button
               v-for="preset in riskPresets"
@@ -81,10 +78,10 @@ const messagesRef = ref<HTMLElement>()
 const draft = ref('')
 const draftSender = ref<Extract<ChatRole, 'self' | 'peer'>>('peer')
 const lastSubmittedFingerprint = ref('')
+const sessionVersion = ref(0)
 
 const apiHost = computed(() => {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:48080'
-
   try {
     return new URL(baseUrl).host
   } catch {
@@ -114,7 +111,10 @@ const scrollToBottom = () => {
 
 watch(() => chatStore.messages.length, scrollToBottom)
 
+const getConversationMessages = () => chatStore.messages.filter((message) => message.type !== 'system')
+
 const applyPreset = (preset: RiskPreset) => {
+  sessionVersion.value += 1
   chatStore.setMessages(
     preset.messages.map((message, index) => ({
       id: `${preset.id}-${index}`,
@@ -126,6 +126,7 @@ const applyPreset = (preset: RiskPreset) => {
   )
   draft.value = ''
   draftSender.value = 'peer'
+  lastSubmittedFingerprint.value = ''
   void maybeAutoAnalyze('已识别到预置场景中的高风险信号，自动提交后台分析')
 }
 
@@ -145,7 +146,7 @@ const handleSend = (text: string) => {
   draft.value = ''
 
   if (draftSender.value === 'peer') {
-    void maybeAutoAnalyze('检测到对方消息中包含高风险信号，已自动提交后台分析')
+    void maybeAutoAnalyze('检测到对方消息中的高风险信号，已自动提交后台分析')
   }
 }
 
@@ -177,29 +178,27 @@ const riskSignalPatterns = [
 const getRiskSignals = (messages: ChatMessage[]) => {
   const peerMessages = messages.filter((message) => message.type === 'peer')
   const content = peerMessages.map((message) => message.content).join('\n')
-
-  return riskSignalPatterns
-    .filter((item) => item.pattern.test(content))
-    .map((item) => item.label)
+  return riskSignalPatterns.filter((item) => item.pattern.test(content)).map((item) => item.label)
 }
 
 const buildAnalysisPayload = () => {
-  const links = extractLinks(chatStore.messages)
-  const latestPeerMessage = [...chatStore.messages].reverse().find((message) => message.type === 'peer')
-  const detectedSignals = getRiskSignals(chatStore.messages)
-  const detectedIp = extractFirstIp(chatStore.messages)
+  const conversationMessages = getConversationMessages()
+  const links = extractLinks(conversationMessages)
+  const latestPeerMessage = [...conversationMessages].reverse().find((message) => message.type === 'peer')
+  const detectedSignals = getRiskSignals(conversationMessages)
+  const detectedIp = extractFirstIp(conversationMessages)
 
   return {
     ip: detectedIp || '8.8.8.8',
     paymentData: {
       scene: 'WECHAT_CHAT_RISK',
       source: 'chat-risk-test-page',
-      messageCount: chatStore.messages.length,
+      messageCount: conversationMessages.length,
       linkCount: links.length,
       links,
       detectedSignals,
       latestPeerMessage: latestPeerMessage?.content || '',
-      messages: chatStore.messages.map((message) => ({
+      messages: conversationMessages.map((message) => ({
         role: message.type,
         senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),
         content: message.content,
@@ -211,7 +210,7 @@ const buildAnalysisPayload = () => {
 
 const buildFingerprint = () =>
   JSON.stringify(
-    chatStore.messages.map((message) => ({
+    getConversationMessages().map((message) => ({
       role: message.type,
       content: message.content,
       time: message.timestamp.toISOString()
@@ -219,12 +218,20 @@ const buildFingerprint = () =>
   )
 
 const submitForAnalysis = async (successText: string) => {
-  if (chatStore.messages.length === 0) {
+  const conversationMessages = getConversationMessages()
+  if (conversationMessages.length === 0) {
     return
   }
 
+  const submitVersion = sessionVersion.value
   chatStore.setLoading(true)
   const result = await assess(buildAnalysisPayload())
+
+  if (submitVersion !== sessionVersion.value) {
+    chatStore.setLoading(false)
+    return
+  }
+
   chatStore.setLoading(false)
 
   if (result) {
@@ -237,11 +244,12 @@ const submitForAnalysis = async (successText: string) => {
 }
 
 const maybeAutoAnalyze = async (successText: string) => {
-  if (chatStore.isLoading || chatStore.messages.length === 0) {
+  const conversationMessages = getConversationMessages()
+  if (chatStore.isLoading || conversationMessages.length === 0) {
     return
   }
 
-  const detectedSignals = getRiskSignals(chatStore.messages)
+  const detectedSignals = getRiskSignals(conversationMessages)
   if (detectedSignals.length === 0) {
     return
   }
@@ -260,7 +268,9 @@ const handleAnalyze = async () => {
 
 const handleClear = () => {
   if (window.confirm('确认清空当前测试对话吗？')) {
+    sessionVersion.value += 1
     chatStore.clearMessages()
+    chatStore.setLoading(false)
     draft.value = ''
     lastSubmittedFingerprint.value = ''
   }
@@ -273,83 +283,49 @@ if (chatStore.messages.length === 0) {
 
 <style scoped>
 .chat-page {
-  position: relative;
   min-height: 100vh;
-  padding: 28px;
+  padding: 24px;
   display: flex;
   justify-content: center;
-  align-items: stretch;
-}
-
-.ambient {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(32px);
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.ambient-left {
-  width: 280px;
-  height: 280px;
-  left: -60px;
-  top: 40px;
-  background: rgba(34, 197, 94, 0.18);
-}
-
-.ambient-right {
-  width: 360px;
-  height: 360px;
-  right: -120px;
-  bottom: -20px;
-  background: rgba(59, 130, 246, 0.12);
-}
-
-.wechat-shell {
-  position: relative;
-  z-index: 1;
+  background: #f3f6fb;
 }
 
 .wechat-shell {
   width: min(100%, 860px);
-  min-height: calc(100vh - 56px);
+  min-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  border-radius: 34px;
+  border-radius: 28px;
   overflow: hidden;
-  background: rgba(233, 238, 243, 0.92);
-  border: 10px solid rgba(17, 24, 39, 0.88);
-  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
+  background: #e9eef3;
+  border: 8px solid #111827;
 }
 
 .wechat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 16px 18px;
-  background: linear-gradient(180deg, rgba(242, 245, 248, 0.98), rgba(232, 237, 242, 0.94));
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  gap: 12px;
+  padding: 14px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #d7dde6;
 }
 
 .header-main {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
+  gap: 10px;
 }
 
 .assistant-avatar {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #16c167, #0fa958);
+  background: #16c167;
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 12px 24px rgba(15, 169, 88, 0.22);
-  flex-shrink: 0;
 }
 
 .header-main h2 {
@@ -359,69 +335,66 @@ if (chatStore.messages.length === 0) {
 
 .header-main p {
   margin: 4px 0 0;
-  color: var(--text-muted);
   font-size: 13px;
+  color: #5b6577;
 }
 
 .status-pill {
   display: inline-block;
   margin-left: 8px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(34, 197, 94, 0.12);
-  color: #15803d;
+  background: #dcfce7;
+  color: #166534;
 }
 
 .status-pill-alert {
-  background: rgba(248, 113, 113, 0.14);
-  color: #b91c1c;
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .header-btn {
   border: 0;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--text-secondary);
+  background: #e4e9f0;
+  color: #334155;
   cursor: pointer;
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 18px 10px;
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.74), transparent 32%),
-    linear-gradient(180deg, rgba(241, 245, 249, 0.9), rgba(229, 234, 239, 0.94));
+  padding: 14px;
 }
 
 .day-divider {
   width: fit-content;
-  margin: 0 auto 18px;
-  padding: 6px 12px;
+  margin: 0 auto 14px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(17, 24, 39, 0.08);
-  color: rgba(17, 24, 39, 0.6);
+  background: #dbe2ea;
+  color: #4b5563;
   font-size: 12px;
 }
 
 .welcome-card {
-  margin-bottom: 24px;
-  padding: 18px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px dashed rgba(34, 197, 94, 0.26);
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px dashed #86efac;
 }
 
 .welcome-card h3 {
   margin: 0;
-  font-size: 22px;
+  font-size: 18px;
 }
 
 .welcome-card p {
-  margin: 10px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.7;
+  margin: 8px 0 0;
+  color: #475569;
+  line-height: 1.6;
 }
 
 .welcome-actions,
@@ -432,28 +405,21 @@ if (chatStore.messages.length === 0) {
 }
 
 .welcome-actions {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .welcome-chip,
 .strip-chip {
   border: 0;
   border-radius: 999px;
-  background: rgba(34, 197, 94, 0.1);
+  background: #dcfce7;
   color: #15803d;
-  padding: 9px 14px;
+  padding: 8px 12px;
   cursor: pointer;
-  font-size: 13px;
 }
 
 .preset-strip {
   padding: 0 14px 12px;
-}
-
-@media (max-width: 1180px) {
-  .wechat-shell {
-    min-height: 75vh;
-  }
 }
 
 @media (max-width: 640px) {
@@ -465,15 +431,6 @@ if (chatStore.messages.length === 0) {
     border-radius: 0;
     border-width: 0;
     min-height: 100vh;
-  }
-
-  .wechat-header {
-    padding-top: max(16px, env(safe-area-inset-top));
-  }
-
-  .chat-messages {
-    padding-left: 12px;
-    padding-right: 12px;
   }
 }
 </style>

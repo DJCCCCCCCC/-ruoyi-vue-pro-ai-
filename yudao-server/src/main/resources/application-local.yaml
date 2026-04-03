@@ -2,6 +2,7 @@ server:
   port: 48080
 
 --- #################### 数据库相关配置 ####################
+
 spring:
   autoconfigure:
     # noinspection SpringBootApplicationYaml
@@ -95,7 +96,7 @@ spring:
 # Quartz 配置项，对应 QuartzProperties 配置类
 spring:
   quartz:
-    auto-startup: true # 本地开发环境，尽量不要开启 Job
+    auto-startup: true # 本地开发环境，尽量不要开启 Job（如需可改为 false）
     scheduler-name: schedulerName # Scheduler 名字。默认为 schedulerName
     job-store-type: jdbc # Job 存储器类型。默认为 memory 表示内存，可选 jdbc 使用数据库。
     wait-for-jobs-to-complete-on-shutdown: true # 应用关闭时，是否等待定时任务执行完成。默认为 false ，建议设置为 true
@@ -143,7 +144,7 @@ spring:
 # Lock4j 配置项
 lock4j:
   acquire-timeout: 3000 # 获取分布式锁超时时间，默认为 3000 毫秒
-  expire: 30000 # 分布式锁的超时时间，默认为 30 毫秒
+  expire: 30000 # 分布式锁的超时时间，默认为 30 秒
 
 --- #################### 监控相关配置 ####################
 
@@ -195,14 +196,14 @@ logging:
     cn.iocoder.yudao.module.iot.dal.tdengine: DEBUG
     cn.iocoder.yudao.module.iot.service.rule: debug
     cn.iocoder.yudao.module.ai.dal.mysql: debug
-    org.springframework.context.support.PostProcessorRegistrationDelegate: ERROR # TODO 芋艿：先禁用，Spring Boot 3.X 存在部分错误的 WARN 提示
+    org.springframework.context.support.PostProcessorRegistrationDelegate: ERROR # TODO 芋道：先禁用，Spring Boot 3.X 存在部分错误的 WARN 提示
 
 debug: false
 
 --- #################### 微信公众号、小程序相关配置 ####################
 wx:
   mp: # 公众号配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-mp-spring-boot-starter/README.md 文档
-#    app-id: wx041349c6f39b268b # 测试号（牛希尧提供的）
+#    app-id: wx041349c6f39b268b # 测试号（芋道源码提供的）
 #    secret: 5abee519483bc9f8cb37ce280e814bd0
 #    app-id: wx5b23ba7a5589ecbb # 测试号（自己的）
 #    secret: 2a7b3b20c537e52e74afd395eb85f61f
@@ -214,9 +215,9 @@ wx:
       key-prefix: wx # Redis Key 的前缀
       http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
   miniapp: # 小程序配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-miniapp-spring-boot-starter/README.md 文档
-    #    appid: wx62056c0d5e8db250 # 测试号（牛希尧提供的）
+    #    appid: wx62056c0d5e8db250 # 测试号（芋道源码提供的）
     #    secret: 333ae72f41552af1e998fe1f54e1584a
-#    appid: wx63c280fe3248a3e7 # wenhualian的接口测试号
+#    appid: wx63c280fe3248a3e7 # wenhualian 的接口测试号
 #    secret: 6f270509224a7ae1296bbf1c8cb97aed
     appid: wxc4598c446f8a9cb3 # 测试号（Kongdy 提供的）
     secret: 4a1a04e07f6a4a0751b39c3064a92c8b
@@ -242,6 +243,8 @@ yudao:
     risk-assess: # 支付风险评估（ipinfo + DeepSeek）
       ipinfo:
         token: "b3f594c0db57e4" # 你的 ipinfo token（不要写在代码里）
+      whoisxml:
+        api-key: "at_eMtKzgvr28EhV7ArM71LX6SbBd6kW"
       deepseek:
         model: deepseek-chat # DeepSeek 模型
         temperature: 0.2 # 生成随机性
@@ -250,9 +253,9 @@ yudao:
     enable: false
   demo: false # 关闭演示模式
   wxa-code:
-    env-version: develop # 小程序版本: 正式版为 "release"；体验版为 "trial"；开发版为 "develop"
+    env-version: develop # 小程序版本：正式版为 "release"；体验版为 "trial"；开发版为 "develop"
   wxa-subscribe-message:
-    miniprogram-state: developer # 跳转小程序类型：开发版为 “developer”；体验版为 “trial”为；正式版为 “formal”
+    miniprogram-state: developer # 跳转小程序类型：开发版为 "developer"；体验版为 "trial"；正式版为 "normal"
   tencent-lbs-key: TVDBZ-TDILD-4ON4B-PFDZA-RNLKH-VVF6E # QQ 地图的密钥 https://lbs.qq.com/service/staticV2/staticGuide/staticDoc
 
 justauth:

@@ -24,4 +24,7 @@ public class AppPayRiskAssessRespVO {
 
     @Schema(description = "Masked IP intelligence")
     private JsonNode ipInfo;
+
+    @Schema(description = "Whois intelligence details")
+    private JsonNode whoisInfo;
 }

@@ -26,5 +26,17 @@ public interface PayRiskAssessService {
      */
     PageResult<PayRiskAssessRecordDO> getRiskAssessRecordPage(PayRiskAssessRecordPageReqVO pageReqVO);
 
+    /**
+     * 鍒犻櫎鏀粯椋庨櫓璇勪及璁板綍
+     *
+     * @param id 缂栧彿
+     */
+    void deleteRiskAssessRecord(Long id);
+
+    /**
+     * 娓呯┖鏀粯椋庨櫓璇勪及璁板綍
+     */
+    void clearRiskAssessRecords();
+
 }
 
