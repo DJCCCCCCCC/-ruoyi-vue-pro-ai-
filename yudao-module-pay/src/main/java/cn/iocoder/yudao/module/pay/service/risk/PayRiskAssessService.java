@@ -7,35 +7,18 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordP
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
 
 import javax.validation.Valid;
+import java.util.Map;
 
 public interface PayRiskAssessService {
 
-    /**
-     * 支付风险评估
-     *
-     * @param reqVO 风险评估请求
-     * @return 风险评估结果
-     */
     AppPayRiskAssessRespVO assess(@Valid AppPayRiskAssessReqVO reqVO);
 
-    /**
-     * 支付风险评估记录分页
-     *
-     * @param pageReqVO 分页请求
-     * @return 分页记录
-     */
+    Map<String, Object> assessAndReturnMap(@Valid AppPayRiskAssessReqVO reqVO);
+
     PageResult<PayRiskAssessRecordDO> getRiskAssessRecordPage(PayRiskAssessRecordPageReqVO pageReqVO);
 
-    /**
-     * 鍒犻櫎鏀粯椋庨櫓璇勪及璁板綍
-     *
-     * @param id 缂栧彿
-     */
     void deleteRiskAssessRecord(Long id);
 
-    /**
-     * 娓呯┖鏀粯椋庨櫓璇勪及璁板綍
-     */
     void clearRiskAssessRecords();
 
 }

@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.pay.controller.app.risk.vo;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -23,8 +24,10 @@ public class AppPayRiskAssessRespVO {
     private List<String> riskFactors;
 
     @Schema(description = "Masked IP intelligence")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private JsonNode ipInfo;
 
     @Schema(description = "Whois intelligence details")
-    private JsonNode whoisInfo;
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private String whoisInfo;
 }
