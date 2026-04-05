@@ -13,7 +13,17 @@
             </p>
           </div>
         </div>
-        <button type="button" class="header-btn" @click="handleClear">清空</button>
+        <div class="header-actions">
+          <button
+            v-if="latestRiskResult"
+            type="button"
+            class="header-btn header-btn-secondary"
+            @click="openRiskDialog"
+          >
+            {{ latestResultButtonText }}
+          </button>
+          <button type="button" class="header-btn" @click="handleClear">清空</button>
+        </div>
       </header>
 
       <div ref="messagesRef" class="chat-messages">
@@ -60,6 +70,40 @@
         @reset="restoreDefaultPreset"
       />
     </section>
+
+    <transition name="risk-dialog-fade">
+      <div
+        v-if="riskDialogVisible && latestRiskResult"
+        class="risk-dialog-mask"
+        @click.self="closeRiskDialog"
+      >
+        <section class="risk-dialog" role="alertdialog" aria-modal="true" aria-labelledby="risk-dialog-title">
+          <div class="risk-dialog-header">
+            <div>
+              <p class="risk-dialog-eyebrow">风险预警弹窗</p>
+              <h3 id="risk-dialog-title">{{ riskDialogTitle }}</h3>
+              <p class="risk-dialog-summary">{{ riskDialogSummary }}</p>
+            </div>
+            <button
+              type="button"
+              class="risk-dialog-close"
+              aria-label="关闭风险预警"
+              @click="closeRiskDialog"
+            >
+              ×
+            </button>
+          </div>
+
+          <RiskResult :riskData="latestRiskResult" />
+
+          <div class="risk-dialog-actions">
+            <button type="button" class="risk-dialog-btn risk-dialog-btn-secondary" @click="closeRiskDialog">
+              我知道了
+            </button>
+          </div>
+        </section>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -67,10 +111,11 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import ChatBubble from '@/components/ChatBubble.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import RiskResult from '@/components/RiskResult.vue'
 import { useRiskAssess } from '@/composables/useRiskAssess'
 import { riskPresets, type RiskPreset } from '@/constants/presets'
 import { useChatStore } from '@/stores/chat'
-import type { ChatMessage, ChatRole } from '@/types'
+import type { ChatMessage, ChatRole, PayRiskAssessRespVO, RiskLevel } from '@/types'
 
 const chatStore = useChatStore()
 const { assess, error } = useRiskAssess()
@@ -79,6 +124,11 @@ const draft = ref('')
 const draftSender = ref<Extract<ChatRole, 'self' | 'peer'>>('peer')
 const lastSubmittedFingerprint = ref('')
 const sessionVersion = ref(0)
+const latestRiskResult = ref<PayRiskAssessRespVO | null>(null)
+const riskDialogVisible = ref(false)
+
+const HIGH_RISK_SCORE_THRESHOLD = 65
+const popupRiskLevels: RiskLevel[] = ['HIGH', 'CRITICAL']
 
 const apiHost = computed(() => {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:48080'
@@ -113,6 +163,55 @@ watch(() => chatStore.messages.length, scrollToBottom)
 
 const getConversationMessages = () => chatStore.messages.filter((message) => message.type !== 'system')
 
+const isPopupRiskResult = (result: PayRiskAssessRespVO) =>
+  Number(result.riskScore) >= HIGH_RISK_SCORE_THRESHOLD || popupRiskLevels.includes(result.riskLevel)
+
+const openRiskDialog = () => {
+  if (latestRiskResult.value) {
+    riskDialogVisible.value = true
+  }
+}
+
+const closeRiskDialog = () => {
+  riskDialogVisible.value = false
+}
+
+const latestResultButtonText = computed(() => {
+  if (!latestRiskResult.value) {
+    return ''
+  }
+  return isPopupRiskResult(latestRiskResult.value) ? '查看风险预警' : '查看分析结果'
+})
+
+const riskDialogTitle = computed(() => {
+  const result = latestRiskResult.value
+  if (!result) {
+    return ''
+  }
+  if (result.riskLevel === 'CRITICAL') {
+    return '检测到严重风险，请立即中止当前操作'
+  }
+  if (isPopupRiskResult(result)) {
+    return '检测到高风险行为，请优先人工复核'
+  }
+  return '已完成本次风险分析，请查看评估结果'
+})
+
+const riskDialogSummary = computed(() => {
+  const result = latestRiskResult.value
+  if (!result) {
+    return ''
+  }
+  const normalizedScore = Math.min(Math.max(Number(result.riskScore) || 0, 0), 100)
+  if (result.riskLevel === 'CRITICAL') {
+    return `当前风险分为 ${normalizedScore} 分，已达到严重风险等级，建议立即拦截并核验对方身份。`
+  }
+  if (isPopupRiskResult(result)) {
+    return `当前风险分为 ${normalizedScore} 分，已达到高风险阈值，建议暂停转账并追加身份验证。`
+  }
+  return `当前风险分为 ${normalizedScore} 分，未触发高风险弹窗阈值，你可以继续结合分析详情判断是否需要人工介入。`
+})
+
 const applyPreset = (preset: RiskPreset) => {
   sessionVersion.value += 1
   chatStore.setMessages(
@@ -127,6 +226,8 @@ const applyPreset = (preset: RiskPreset) => {
   draft.value = ''
   draftSender.value = 'peer'
   lastSubmittedFingerprint.value = ''
+  latestRiskResult.value = null
+  riskDialogVisible.value = false
   void maybeAutoAnalyze('已识别到预置场景中的高风险信号，自动提交后台分析')
 }
 
@@ -236,6 +337,8 @@ const submitForAnalysis = async (successText: string) => {
 
   if (result) {
     lastSubmittedFingerprint.value = buildFingerprint()
+    latestRiskResult.value = result
+    riskDialogVisible.value = isPopupRiskResult(result)
     chatStore.addMessage(createMessage('system', successText))
     return
   }
@@ -273,6 +376,8 @@ const handleClear = () => {
     chatStore.setLoading(false)
     draft.value = ''
     lastSubmittedFingerprint.value = ''
+    latestRiskResult.value = null
+    riskDialogVisible.value = false
   }
 }
 
@@ -353,6 +458,12 @@ if (chatStore.messages.length === 0) {
   color: #991b1b;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .header-btn {
   border: 0;
   padding: 8px 14px;
@@ -360,6 +471,11 @@ if (chatStore.messages.length === 0) {
   background: #e4e9f0;
   color: #334155;
   cursor: pointer;
+}
+
+.header-btn-secondary {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .chat-messages {
@@ -422,6 +538,109 @@ if (chatStore.messages.length === 0) {
   padding: 0 14px 12px;
 }
 
+.risk-dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.risk-dialog {
+  width: min(100%, 560px);
+  max-height: min(100vh - 48px, 760px);
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, #fff8f8 0%, #ffffff 100%);
+  border: 1px solid rgba(248, 113, 113, 0.24);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+  transition: transform 0.22s ease;
+}
+
+.risk-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.risk-dialog-eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #dc2626;
+  text-transform: uppercase;
+}
+
+.risk-dialog-header h3 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.3;
+  color: #111827;
+}
+
+.risk-dialog-summary {
+  margin: 8px 0 0;
+  line-height: 1.7;
+  color: #475569;
+}
+
+.risk-dialog-close {
+  border: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: #334155;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.risk-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.risk-dialog-btn {
+  border: 0;
+  min-width: 112px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.risk-dialog-btn-secondary {
+  background: #111827;
+  color: #fff;
+}
+
+.risk-dialog-fade-enter-active,
+.risk-dialog-fade-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+.risk-dialog-fade-enter-from,
+.risk-dialog-fade-leave-to {
+  opacity: 0;
+}
+
+.risk-dialog-fade-enter-from .risk-dialog,
+.risk-dialog-fade-leave-to .risk-dialog {
+  transform: translateY(12px) scale(0.98);
+}
+
 @media (max-width: 640px) {
   .chat-page {
     padding: 0;
@@ -431,6 +650,29 @@ if (chatStore.messages.length === 0) {
     border-radius: 0;
     border-width: 0;
     min-height: 100vh;
+  }
+
+  .wechat-header {
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .risk-dialog-mask {
+    padding: 12px;
+  }
+
+  .risk-dialog {
+    padding: 16px;
+    border-radius: 22px;
+    max-height: calc(100vh - 24px);
+  }
+
+  .risk-dialog-header h3 {
+    font-size: 20px;
   }
 }
 </style>
