@@ -12,6 +12,8 @@ import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
@@ -69,20 +71,26 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
         PayRiskAssessAiResponse aiResp = deepSeekClient.assess(paymentMaskedJson, ipInfoMaskedJson);
 
+        BehaviorAssessBundle behaviorAssessBundle = assessBehaviorRisk(paymentData);
         PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = PayRiskLinkAnalyzer.analyze(paymentData);
         WhoisAssessBundle whoisAssessBundle = assessWhoisRisk(paymentData);
         PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = whoisAssessBundle.getAssessment();
 
         PayRiskAssessAiResponse mergedResp = mergeExternalRisk(aiResp,
+                behaviorAssessBundle.getAssessment().getExtraScore(),
+                behaviorAssessBundle.getAssessment().getFactors(),
+                behaviorAssessBundle.getAssessment().getNotes(),
+                "生物行为分析");
+        mergedResp = mergeExternalRisk(mergedResp,
                 linkRiskAssessment.getExtraScore(),
                 linkRiskAssessment.getFactors(),
                 linkRiskAssessment.getNotes(),
-                "Link intelligence");
+                "链接情报");
         mergedResp = mergeExternalRisk(mergedResp,
                 whoisRiskAssessment.getExtraScore(),
                 whoisRiskAssessment.getFactors(),
                 whoisRiskAssessment.getNotes(),
-                "Whois intelligence");
+                "Whois 情报");
 
         AppPayRiskAssessRespVO respVO = new AppPayRiskAssessRespVO();
         respVO.setRiskScore(mergedResp.getRiskScore());
@@ -90,6 +98,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setDeepAnalysis(mergedResp.getDeepAnalysis());
         respVO.setRiskFactors(mergedResp.getRiskFactors());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
+        respVO.setBehaviorInfo(buildBehaviorInfo(behaviorAssessBundle));
 
         JsonNode whoisInfoNode = buildWhoisInfo(whoisAssessBundle);
         String whoisInfoStr = JsonUtils.toJsonString(whoisInfoNode);
@@ -100,17 +109,19 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
         respVO.setWhoisInfo(whoisInfoStr);
 
+        appendBehaviorInfo(respVO, behaviorAssessBundle);
+
         if (whoisInfoNode != null && !whoisInfoNode.isNull() && whoisInfoNode.size() > 0) {
             String formattedWhois = formatWhoisInfoForDisplay(whoisInfoNode);
-            String currentAnalysis = mergedResp.getDeepAnalysis() != null ? mergedResp.getDeepAnalysis() : "";
+            String currentAnalysis = respVO.getDeepAnalysis() != null ? respVO.getDeepAnalysis() : "";
             respVO.setDeepAnalysis(currentAnalysis + "\n\n" + formattedWhois);
 
-            List<String> currentFactors = mergedResp.getRiskFactors();
-            if (currentFactors == null) {
-                currentFactors = new ArrayList<>();
+            Set<String> currentFactors = new LinkedHashSet<>();
+            if (respVO.getRiskFactors() != null) {
+                currentFactors.addAll(respVO.getRiskFactors());
             }
             currentFactors.add("已完成域名 Whois 安全检测");
-            respVO.setRiskFactors(currentFactors);
+            respVO.setRiskFactors(new ArrayList<>(currentFactors));
 
             log.info("[assess] ✅ 已将格式化的 Whois 详情加入 deepAnalysis");
         }
@@ -130,6 +141,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("riskFactors", respVO.getRiskFactors());
         result.put("ipInfo", respVO.getIpInfo());
         result.put("whoisInfo", respVO.getWhoisInfo());
+        result.put("behaviorInfo", respVO.getBehaviorInfo());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 
@@ -149,6 +161,51 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Override
     public void clearRiskAssessRecords() {
         payRiskAssessRecordMapper.deleteAllPhysically();
+    }
+
+    private BehaviorAssessBundle assessBehaviorRisk(JsonNode paymentData) {
+        PayRiskBehaviorMockDataGenerator.MockBehaviorProfile profile =
+                PayRiskBehaviorMockDataGenerator.generateIfMissing(paymentData);
+        PayRiskBehaviorAnalyzer.BehaviorRiskAssessment assessment =
+                PayRiskBehaviorAnalyzer.analyze(profile.getBehaviorData());
+        return new BehaviorAssessBundle(assessment, profile.getBehaviorData(), profile.isMocked(), profile.getSummary());
+    }
+
+    private JsonNode buildBehaviorInfo(BehaviorAssessBundle bundle) {
+        ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
+        if (bundle == null || bundle.getAssessment() == null) {
+            return root;
+        }
+        root.put("mocked", bundle.isMocked());
+        root.put("summary", bundle.getSummary());
+        root.put("extraScore", bundle.getAssessment().getExtraScore() == null ? 0 : bundle.getAssessment().getExtraScore());
+        root.putPOJO("factors", bundle.getAssessment().getFactors());
+        root.putPOJO("notes", bundle.getAssessment().getNotes());
+        if (bundle.getBehaviorSnapshot() != null && !bundle.getBehaviorSnapshot().isNull()) {
+            root.set("snapshot", bundle.getBehaviorSnapshot());
+        }
+        return root;
+    }
+
+    private void appendBehaviorInfo(AppPayRiskAssessRespVO respVO, BehaviorAssessBundle bundle) {
+        JsonNode behaviorInfo = respVO.getBehaviorInfo();
+        if (bundle == null || bundle.getAssessment() == null || behaviorInfo == null
+                || behaviorInfo.isNull() || behaviorInfo.size() == 0) {
+            return;
+        }
+        String formattedBehavior = formatBehaviorInfoForDisplay(behaviorInfo);
+        if (formattedBehavior == null || formattedBehavior.trim().isEmpty()) {
+            return;
+        }
+        String currentAnalysis = respVO.getDeepAnalysis() != null ? respVO.getDeepAnalysis() : "";
+        respVO.setDeepAnalysis(currentAnalysis + "\n\n" + formattedBehavior);
+
+        Set<String> mergedFactors = new LinkedHashSet<>();
+        if (respVO.getRiskFactors() != null) {
+            mergedFactors.addAll(respVO.getRiskFactors());
+        }
+        mergedFactors.add(bundle.isMocked() ? "已完成模拟生物行为分析" : "已完成生物行为分析");
+        respVO.setRiskFactors(new ArrayList<>(mergedFactors));
     }
 
     private WhoisAssessBundle assessWhoisRisk(JsonNode paymentData) {
@@ -249,10 +306,10 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 deepAnalysis.append("\n\n");
             }
             deepAnalysis.append(sourceLabel)
-                    .append(" added ")
+                    .append(" 增加 ")
                     .append(extraScore)
-                    .append(" points: ")
-                    .append(String.join("; ", extraNotes));
+                    .append(" 分：")
+                    .append(String.join("；", extraNotes));
         }
 
         PayRiskAssessAiResponse mergedResp = new PayRiskAssessAiResponse();
@@ -436,6 +493,59 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         }
     }
 
+    private String formatBehaviorInfoForDisplay(JsonNode behaviorInfoNode) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        sb.append("  生物行为分析报告\n");
+        sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        if (behaviorInfoNode.path("mocked").asBoolean(false)) {
+            sb.append("\n说明: 当前未接入真实生物行为采集，本次结果基于后端模拟行为画像生成。");
+        } else {
+            sb.append("\n说明: 当前结果来自请求中上传的真实生物行为信号。");
+        }
+
+        String summary = safeNodeText(behaviorInfoNode.path("summary"));
+        if (summary != null) {
+            sb.append("\n摘要: ").append(summary);
+        }
+
+        int extraScore = behaviorInfoNode.path("extraScore").asInt(0);
+        sb.append("\n行为加分: +").append(extraScore).append(" 分");
+
+        JsonNode factors = behaviorInfoNode.path("factors");
+        if (factors.isArray() && factors.size() > 0) {
+            sb.append("\n触发因素:");
+            for (JsonNode factor : factors) {
+                sb.append("\n - ").append(factor.asText());
+            }
+        }
+
+        JsonNode snapshot = behaviorInfoNode.path("snapshot");
+        if (snapshot.isObject()) {
+            sb.append("\n关键指标:");
+            appendMetricLine(sb, "操作速度", snapshot, "operationSpeed");
+            appendMetricLine(sb, "敏感字段输入耗时(ms)", snapshot, "cardNumberInputDurationMs");
+            appendMetricLine(sb, "按键平均间隔(ms)", snapshot, "averageKeyIntervalMs");
+            appendMetricLine(sb, "按键波动标准差(ms)", snapshot, "keyIntervalStdMs");
+            appendMetricLine(sb, "鼠标轨迹笔直度", snapshot, "mouseStraightness");
+            appendMetricLine(sb, "指针跳点次数", snapshot, "pointerJumpCount");
+            appendMetricLine(sb, "轨迹类型", snapshot, "mouseTrajectoryType");
+            appendMetricLine(sb, "是否粘贴输入", snapshot, "pasteDetected");
+            appendMetricLine(sb, "是否模拟器", snapshot, "emulatorDetected");
+            appendMetricLine(sb, "是否脚本提示", snapshot, "scriptHint");
+        }
+        return sb.toString();
+    }
+
+    private void appendMetricLine(StringBuilder sb, String label, JsonNode snapshot, String fieldName) {
+        JsonNode node = snapshot.path(fieldName);
+        if (node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        sb.append("\n - ").append(label).append(": ").append(node.asText());
+    }
+
     private static String safeNodeText(JsonNode... nodes) {
         for (JsonNode node : nodes) {
             if (node != null && !node.isMissingNode() && !node.isNull()) {
@@ -446,5 +556,38 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             }
         }
         return null;
+    }
+
+    private static class BehaviorAssessBundle {
+        private final PayRiskBehaviorAnalyzer.BehaviorRiskAssessment assessment;
+        private final JsonNode behaviorSnapshot;
+        private final boolean mocked;
+        private final String summary;
+
+        private BehaviorAssessBundle(PayRiskBehaviorAnalyzer.BehaviorRiskAssessment assessment,
+                                     JsonNode behaviorSnapshot,
+                                     boolean mocked,
+                                     String summary) {
+            this.assessment = assessment;
+            this.behaviorSnapshot = behaviorSnapshot;
+            this.mocked = mocked;
+            this.summary = summary;
+        }
+
+        private PayRiskBehaviorAnalyzer.BehaviorRiskAssessment getAssessment() {
+            return assessment;
+        }
+
+        private JsonNode getBehaviorSnapshot() {
+            return behaviorSnapshot;
+        }
+
+        private boolean isMocked() {
+            return mocked;
+        }
+
+        private String getSummary() {
+            return summary;
+        }
     }
 }

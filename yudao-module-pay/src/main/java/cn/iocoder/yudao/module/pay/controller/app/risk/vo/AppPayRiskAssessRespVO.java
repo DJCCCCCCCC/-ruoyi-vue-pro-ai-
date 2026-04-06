@@ -30,4 +30,8 @@ public class AppPayRiskAssessRespVO {
     @Schema(description = "Whois intelligence details")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private String whoisInfo;
+
+    @Schema(description = "Behavioral biometrics analysis details")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private JsonNode behaviorInfo;
 }

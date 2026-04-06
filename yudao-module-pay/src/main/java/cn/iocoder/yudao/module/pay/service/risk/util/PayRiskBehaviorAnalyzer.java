@@ -42,77 +42,76 @@ public class PayRiskBehaviorAnalyzer {
 
         if (operationSpeed != null && operationSpeed >= 95) {
             extraScore += 28;
-            factors.add("operation_speed extremely high, close to automated interaction");
-            notes.add("operation_speed=" + operationSpeed + ", significantly above normal manual input.");
+            factors.add("操作速度极高，接近自动化交互");
+            notes.add("operationSpeed=" + operationSpeed + "，明显高于正常人工操作区间。");
         } else if (operationSpeed != null && operationSpeed >= 80) {
             extraScore += 16;
-            factors.add("operation_speed abnormal for a normal user");
-            notes.add("operation_speed=" + operationSpeed + ", indicates unusually fast interaction.");
+            factors.add("操作速度异常偏快");
+            notes.add("operationSpeed=" + operationSpeed + "，表现出明显的非常规高速交互。");
         }
 
         if (cardNumberLength != null && cardNumberLength >= 16 && cardNumberInputDurationMs != null) {
             if (cardNumberInputDurationMs < 500) {
                 extraScore += 35;
-                factors.add("16-digit card number entered in under 0.5 seconds");
-                notes.add("Card number length=" + cardNumberLength + ", input duration=" + cardNumberInputDurationMs
-                        + "ms, very similar to script or auto-fill behavior.");
+                factors.add("16 位敏感字段在 0.5 秒内完成输入");
+                notes.add("cardNumberLength=" + cardNumberLength + "，inputDuration=" + cardNumberInputDurationMs
+                        + "ms，极像脚本填充或自动回放行为。");
             } else if (cardNumberInputDurationMs < 1200) {
                 extraScore += 18;
-                factors.add("Card number entry speed is unusually fast");
-                notes.add("Card number input duration=" + cardNumberInputDurationMs
-                        + "ms, faster than normal manual typing.");
+                factors.add("敏感字段输入速度异常偏快");
+                notes.add("cardNumberInputDurationMs=" + cardNumberInputDurationMs + "，快于正常人工录入。");
             }
         }
 
         if (Boolean.TRUE.equals(pasteDetected)) {
             extraScore += 12;
-            factors.add("Sensitive field appears to be pasted instead of typed");
-            notes.add("paste_detected=true on a payment-sensitive field.");
+            factors.add("敏感字段疑似为粘贴输入");
+            notes.add("pasteDetected=true，支付敏感字段存在直接粘贴迹象。");
         }
 
         if (averageKeyIntervalMs != null && averageKeyIntervalMs < 45) {
             extraScore += 10;
-            factors.add("Average keystroke interval is too short");
-            notes.add("average_key_interval_ms=" + averageKeyIntervalMs + ", below typical manual input rhythm.");
+            factors.add("按键平均间隔过短");
+            notes.add("averageKeyIntervalMs=" + averageKeyIntervalMs + "，低于常见人工输入节奏。");
         }
 
         if (keyIntervalStdMs != null && keyIntervalStdMs <= 20) {
             extraScore += 12;
-            factors.add("Keystroke intervals are overly uniform");
-            notes.add("key_interval_std_ms=" + keyIntervalStdMs + ", shows low human pause variance.");
+            factors.add("按键节奏过于均匀");
+            notes.add("keyIntervalStdMs=" + keyIntervalStdMs + "，缺少人类输入常见的停顿波动。");
         }
 
         if (mouseStraightness != null && mouseStraightness >= 0.92D) {
             extraScore += 10;
-            factors.add("Mouse trajectory is too straight");
-            notes.add("mouse_straightness=" + mouseStraightness + ", close to linear script path.");
+            factors.add("鼠标轨迹过于笔直");
+            notes.add("mouseStraightness=" + mouseStraightness + "，接近脚本生成的线性路径。");
         }
 
         if (pointerJumpCount != null && pointerJumpCount >= 2) {
             extraScore += 12;
-            factors.add("Pointer movement shows jump behavior");
-            notes.add("pointer_jump_count=" + pointerJumpCount + ", looks like instant position jumps.");
+            factors.add("指针轨迹存在跳点行为");
+            notes.add("pointerJumpCount=" + pointerJumpCount + "，更像程序瞬移式定位。");
         }
 
         if (mouseTrajectoryType != null) {
             String normalizedTrajectoryType = mouseTrajectoryType.trim().toUpperCase(Locale.ROOT);
             if ("LINEAR".equals(normalizedTrajectoryType) || "JUMP".equals(normalizedTrajectoryType)) {
                 extraScore += 10;
-                factors.add("Mouse trajectory type suggests automation");
-                notes.add("mouse_trajectory_type=" + normalizedTrajectoryType + ".");
+                factors.add("鼠标轨迹类型疑似自动化");
+                notes.add("mouseTrajectoryType=" + normalizedTrajectoryType + "。");
             }
         }
 
         if (Boolean.TRUE.equals(emulatorDetected)) {
             extraScore += 15;
-            factors.add("Emulator or virtualized device hint detected");
-            notes.add("emulator_detected=true.");
+            factors.add("检测到模拟器或虚拟化设备迹象");
+            notes.add("emulatorDetected=true。");
         }
 
         if (Boolean.TRUE.equals(scriptHint)) {
             extraScore += 20;
-            factors.add("Behavior data contains direct script hint");
-            notes.add("script_hint=true, likely automated or instrumented execution.");
+            factors.add("行为数据出现直接脚本特征");
+            notes.add("scriptHint=true，高度怀疑存在自动化执行或插桩。");
         }
 
         return new BehaviorRiskAssessment(
