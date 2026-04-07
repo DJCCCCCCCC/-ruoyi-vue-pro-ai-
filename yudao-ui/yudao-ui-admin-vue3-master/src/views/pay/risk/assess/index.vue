@@ -57,6 +57,13 @@
           </div>
         </ContentWrap>
 
+        <ThreatIntelPanel
+          v-if="result"
+          :ip-info="result?.ipInfo"
+          :whois-info="result?.whoisInfo"
+          :payment-data="parsedPaymentObject"
+        />
+
         <ContentWrap class="panel json-panel">
           <div class="json-grid">
             <div class="json-card">
@@ -125,6 +132,7 @@
 import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
+import ThreatIntelPanel from './components/ThreatIntelPanel.vue'
 import {
   assessPayRisk,
   clearPayRiskAssessRecords,
@@ -148,7 +156,7 @@ const recordQuery = reactive({
   pageSize: 10
 })
 
-const examples = {
+const examples: Record<string, { ip: string; paymentData: Record<string, unknown> }> = {
   normal: {
     ip: '8.8.8.8',
     paymentData: {
@@ -169,7 +177,7 @@ const examples = {
       links: ['https://pay-safe-refund.example.com/verify?id=8831']
     }
   }
-} as const
+}
 
 const form = reactive({
   ip: examples.chat.ip,
@@ -177,6 +185,7 @@ const form = reactive({
 })
 
 const result = ref<PayRiskAssessRespVO | null>(null)
+const parsedPaymentObject = computed(() => parseJsonText(form.paymentDataJson, {}))
 
 const riskScore = computed(() => Math.min(Math.max(Number(result.value?.riskScore || 0), 0), 100))
 const resultJson = computed(() => (result.value ? JSON.stringify(result.value, null, 2) : '// no result'))

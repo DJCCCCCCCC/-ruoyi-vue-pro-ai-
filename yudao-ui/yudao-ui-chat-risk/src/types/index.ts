@@ -15,6 +15,18 @@ export interface BehaviorInfo {
   snapshot?: Record<string, unknown>
 }
 
+export interface WhoisRecord {
+  domain?: string
+  payload?: unknown
+}
+
+export interface WhoisInfo {
+  extraScore?: number
+  factors?: string[]
+  notes?: string[]
+  records?: WhoisRecord[]
+}
+
 export interface PayRiskAssessRespVO {
   riskScore: number
   riskLevel: RiskLevel
@@ -22,6 +34,7 @@ export interface PayRiskAssessRespVO {
   riskFactors?: string[]
   ipInfo?: unknown
   behaviorInfo?: BehaviorInfo
+  whoisInfo?: string
 }
 
 export interface ChatMessage {

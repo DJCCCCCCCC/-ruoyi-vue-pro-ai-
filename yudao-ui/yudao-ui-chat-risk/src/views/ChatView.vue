@@ -318,7 +318,7 @@ const buildFingerprint = () =>
     }))
   )
 
-const submitForAnalysis = async (successText: string) => {
+const submitForAnalysis = async (successText: string, forceOpenDialog = false) => {
   const conversationMessages = getConversationMessages()
   if (conversationMessages.length === 0) {
     return
@@ -338,7 +338,7 @@ const submitForAnalysis = async (successText: string) => {
   if (result) {
     lastSubmittedFingerprint.value = buildFingerprint()
     latestRiskResult.value = result
-    riskDialogVisible.value = isPopupRiskResult(result)
+    riskDialogVisible.value = forceOpenDialog || isPopupRiskResult(result)
     chatStore.addMessage(createMessage('system', successText))
     return
   }
@@ -366,7 +366,7 @@ const maybeAutoAnalyze = async (successText: string) => {
 }
 
 const handleAnalyze = async () => {
-  await submitForAnalysis('当前聊天记录已手动提交到后台风控分析')
+  await submitForAnalysis('当前聊天记录已手动提交到后台风控分析', true)
 }
 
 const handleClear = () => {
@@ -551,10 +551,10 @@ if (chatStore.messages.length === 0) {
 }
 
 .risk-dialog {
-  width: min(100%, 560px);
-  max-height: min(100vh - 48px, 760px);
+  width: min(100%, 920px);
+  max-height: min(100vh - 40px, 900px);
   overflow-y: auto;
-  padding: 20px;
+  padding: 24px;
   border-radius: 28px;
   background: linear-gradient(180deg, #fff8f8 0%, #ffffff 100%);
   border: 1px solid rgba(248, 113, 113, 0.24);
@@ -590,6 +590,7 @@ if (chatStore.messages.length === 0) {
   margin: 8px 0 0;
   line-height: 1.7;
   color: #475569;
+  max-width: 720px;
 }
 
 .risk-dialog-close {

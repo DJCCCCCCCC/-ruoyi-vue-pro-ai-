@@ -18,6 +18,7 @@ export interface PayRiskAssessRespVO {
   riskFactors?: string[]
   ipInfo?: any
   whoisInfo?: any
+  behaviorInfo?: any
 }
 
 export interface PayRiskAssessRecordVO {
