@@ -64,6 +64,8 @@
           :payment-data="parsedPaymentObject"
         />
 
+        <PaymentTopologyPanel :topology="result?.topologyInfo" :payment-data="parsedPaymentObject" />
+
         <ContentWrap class="panel json-panel">
           <div class="json-grid">
             <div class="json-card">
@@ -132,6 +134,7 @@
 import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
+import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
 import ThreatIntelPanel from './components/ThreatIntelPanel.vue'
 import {
   assessPayRisk,
@@ -174,7 +177,39 @@ const examples: Record<string, { ip: string; paymentData: Record<string, unknown
       source: 'chat-risk-test-page',
       linkCount: 1,
       latestPeerMessage: 'Please click refund link in 3 minutes',
-      links: ['https://pay-safe-refund.example.com/verify?id=8831']
+      links: ['https://pay-safe-refund.example.com/verify?id=8831'],
+      transactions: [
+        {
+          amount: 1888,
+          payer: {
+            userId: 'u-1001',
+            name: 'Alice',
+            mobile: '13800001111',
+            deviceId: 'device-9',
+            ip: '103.24.10.23'
+          },
+          payee: {
+            merchantNo: 'm-3001',
+            merchantName: 'Refund Service',
+            accountNo: 'acc-risk-01'
+          }
+        },
+        {
+          amount: 2999,
+          payer: {
+            userId: 'u-1002',
+            name: 'Bob',
+            mobile: '13800002222',
+            deviceId: 'device-9',
+            ip: '103.24.10.88'
+          },
+          payee: {
+            merchantNo: 'm-3001',
+            merchantName: 'Refund Service',
+            accountNo: 'acc-risk-01'
+          }
+        }
+      ]
     }
   }
 }
@@ -283,7 +318,8 @@ const handleUseRecord = (record: PayRiskAssessRecordVO) => {
     riskLevel: record.riskLevel,
     deepAnalysis: record.deepAnalysis || '',
     riskFactors: parseJsonText(record.riskFactorsJson, []),
-    ipInfo: parseJsonText(record.ipInfoJson, {})
+    ipInfo: parseJsonText(record.ipInfoJson, {}),
+    topologyInfo: undefined
   }
 }
 

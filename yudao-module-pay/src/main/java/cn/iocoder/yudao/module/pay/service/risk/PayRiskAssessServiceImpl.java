@@ -16,6 +16,7 @@ import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -73,6 +74,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
         BehaviorAssessBundle behaviorAssessBundle = assessBehaviorRisk(paymentData);
         PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = PayRiskLinkAnalyzer.analyze(paymentData);
+        PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment topologyRiskAssessment =
+                PayRiskRelationTopologyAnalyzer.analyze(paymentData);
         WhoisAssessBundle whoisAssessBundle = assessWhoisRisk(paymentData);
         PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = whoisAssessBundle.getAssessment();
 
@@ -87,6 +90,11 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 linkRiskAssessment.getNotes(),
                 "链接情报");
         mergedResp = mergeExternalRisk(mergedResp,
+                topologyRiskAssessment.getExtraScore(),
+                topologyRiskAssessment.getFactors(),
+                topologyRiskAssessment.getNotes(),
+                "payment relation topology");
+        mergedResp = mergeExternalRisk(mergedResp,
                 whoisRiskAssessment.getExtraScore(),
                 whoisRiskAssessment.getFactors(),
                 whoisRiskAssessment.getNotes(),
@@ -99,6 +107,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setRiskFactors(mergedResp.getRiskFactors());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
         respVO.setBehaviorInfo(buildBehaviorInfo(behaviorAssessBundle));
+        respVO.setTopologyInfo(topologyRiskAssessment.getTopology());
 
         JsonNode whoisInfoNode = buildWhoisInfo(whoisAssessBundle);
         String whoisInfoStr = JsonUtils.toJsonString(whoisInfoNode);
@@ -142,6 +151,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("ipInfo", respVO.getIpInfo());
         result.put("whoisInfo", respVO.getWhoisInfo());
         result.put("behaviorInfo", respVO.getBehaviorInfo());
+        result.put("topologyInfo", respVO.getTopologyInfo());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 

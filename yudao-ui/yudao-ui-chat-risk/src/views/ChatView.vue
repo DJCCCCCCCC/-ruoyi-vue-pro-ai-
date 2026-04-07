@@ -126,6 +126,7 @@ const lastSubmittedFingerprint = ref('')
 const sessionVersion = ref(0)
 const latestRiskResult = ref<PayRiskAssessRespVO | null>(null)
 const riskDialogVisible = ref(false)
+const activePreset = ref<RiskPreset | null>(null)
 
 const HIGH_RISK_SCORE_THRESHOLD = 65
 const popupRiskLevels: RiskLevel[] = ['HIGH', 'CRITICAL']
@@ -213,6 +214,7 @@ const riskDialogSummary = computed(() => {
 })
 
 const applyPreset = (preset: RiskPreset) => {
+  activePreset.value = preset
   sessionVersion.value += 1
   chatStore.setMessages(
     preset.messages.map((message, index) => ({
@@ -282,23 +284,61 @@ const getRiskSignals = (messages: ChatMessage[]) => {
   return riskSignalPatterns.filter((item) => item.pattern.test(content)).map((item) => item.label)
 }
 
+const extractAmountFromMessages = (messages: ChatMessage[]) => {
+  const pattern = /(\d+(?:\.\d{1,2})?)\s*(?:元|块|￥|¥)/g
+  const amounts: number[] = []
+  for (const message of messages) {
+    const matches = message.content.matchAll(pattern)
+    for (const match of matches) {
+      const amount = Number(match[1])
+      if (Number.isFinite(amount) && amount > 0) {
+        amounts.push(amount)
+      }
+    }
+  }
+  return amounts.length ? amounts[amounts.length - 1] : undefined
+}
+
+const buildSimulatedTransactions = (amount: number | undefined) => {
+  const simulation = activePreset.value?.simulation
+  if (!simulation) {
+    return undefined
+  }
+  return [
+    {
+      amount: amount || simulation.amount,
+      currency: simulation.currency || 'CNY',
+      relationLabel: simulation.relationLabel,
+      relationType: simulation.relationType,
+      payer: simulation.payer,
+      payee: simulation.payee
+    }
+  ]
+}
+
 const buildAnalysisPayload = () => {
   const conversationMessages = getConversationMessages()
   const links = extractLinks(conversationMessages)
   const latestPeerMessage = [...conversationMessages].reverse().find((message) => message.type === 'peer')
   const detectedSignals = getRiskSignals(conversationMessages)
   const detectedIp = extractFirstIp(conversationMessages)
+  const detectedAmount = extractAmountFromMessages(conversationMessages)
+  const transactions = buildSimulatedTransactions(detectedAmount)
 
   return {
     ip: detectedIp || '8.8.8.8',
     paymentData: {
       scene: 'WECHAT_CHAT_RISK',
       source: 'chat-risk-test-page',
+      presetId: activePreset.value?.id,
+      presetTitle: activePreset.value?.title,
       messageCount: conversationMessages.length,
       linkCount: links.length,
       links,
+      amount: detectedAmount,
       detectedSignals,
       latestPeerMessage: latestPeerMessage?.content || '',
+      transactions,
       messages: conversationMessages.map((message) => ({
         role: message.type,
         senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),

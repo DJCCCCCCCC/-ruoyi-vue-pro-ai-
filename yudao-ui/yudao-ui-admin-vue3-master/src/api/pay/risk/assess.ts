@@ -19,6 +19,47 @@ export interface PayRiskAssessRespVO {
   ipInfo?: any
   whoisInfo?: any
   behaviorInfo?: any
+  topologyInfo?: PayRiskRelationTopology
+}
+
+export interface PayRiskRelationTopology {
+  summary?: {
+    nodeCount?: number
+    edgeCount?: number
+    participantCount?: number
+    payerCount?: number
+    payeeCount?: number
+    transactionCount?: number
+    signalCount?: number
+    sharedAttributeCount?: number
+  }
+  nodes?: Array<{
+    id: string
+    label: string
+    type: string
+    role?: string
+    riskLevel?: string
+    tags?: string[]
+    meta?: Record<string, any>
+  }>
+  edges?: Array<{
+    source: string
+    target: string
+    type: string
+    label?: string
+    riskLevel?: string
+    count?: number
+    amount?: number | string
+    meta?: Record<string, any>
+  }>
+  signals?: Array<{
+    code: string
+    level: string
+    title: string
+    description: string
+    score?: number
+    relatedNodeIds?: string[]
+  }>
 }
 
 export interface PayRiskAssessRecordVO {

@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.pay.controller.app.risk.vo;
 
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskRelationTopology;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,4 +35,8 @@ public class AppPayRiskAssessRespVO {
     @Schema(description = "Behavioral biometrics analysis details")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private JsonNode behaviorInfo;
+
+    @Schema(description = "Payment relation topology")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private PayRiskRelationTopology topologyInfo;
 }
