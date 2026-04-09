@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.pay.service.risk.client;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.http.HttpUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +47,10 @@ public class WhoisXmlApiClient {
             if (response.getStatus() >= 400) {
                 log.warn("[WhoisXmlApiClient][lookupDomain] http status={} domain={} body={}",
                         response.getStatus(), domain, body);
+                JsonNode errorBody = tryParseJson(body);
+                if (errorBody != null) {
+                    return errorBody;
+                }
                 return buildErrorPayload("http status " + response.getStatus() + ", body: " + body);
             }
             JsonNode payload = JsonUtils.parseTree(body);
@@ -56,14 +61,21 @@ public class WhoisXmlApiClient {
         }
     }
 
-    private JsonNode buildErrorPayload(String msg) {
-        return JsonUtils.parseTree("{\"ErrorMessage\":{\"msg\":\"" + safe(msg) + "\"}}");
+    private JsonNode tryParseJson(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return JsonUtils.parseTree(text);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
-    private String safe(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.replace("\\", "\\\\").replace("\"", "\\\"");
+    private JsonNode buildErrorPayload(String msg) {
+        ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
+        ObjectNode errorMessage = root.putObject("ErrorMessage");
+        errorMessage.put("msg", msg == null ? "" : msg);
+        return root;
     }
 }

@@ -57,6 +57,12 @@
       </div>
     </section>
 
+    <LlmRiskReportPanel v-if="riskData.llmReport" :report="riskData.llmReport" />
+
+    <AdvancedRiskAnalysisPanel v-if="riskData.advancedAnalysis" :analysis="riskData.advancedAnalysis" />
+
+    <RelationTopologyPanel v-if="riskData.topologyInfo" :topology="riskData.topologyInfo" />
+
     <section v-if="behaviorInfo" class="module-card module-behavior">
       <div class="module-head">
         <div>
@@ -329,6 +335,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AdvancedRiskAnalysisPanel from '@/components/AdvancedRiskAnalysisPanel.vue'
+import LlmRiskReportPanel from '@/components/LlmRiskReportPanel.vue'
+import RelationTopologyPanel from '@/components/RelationTopologyPanel.vue'
 import type { BehaviorInfo, PayRiskAssessRespVO, RiskLevel, WhoisInfo } from '@/types'
 import { formatJSON } from '@/utils/parser'
 

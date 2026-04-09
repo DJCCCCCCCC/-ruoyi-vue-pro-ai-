@@ -39,7 +39,18 @@ public class PayRiskAssessRecordRespVO {
     @Schema(description = "IP 情报 JSON 字符串")
     private String ipInfoJson;
 
+    @Schema(description = "Whois 情报 JSON 字符串")
+    private String whoisInfoJson;
+
+    @Schema(description = "生物行为分析 JSON 字符串")
+    private String behaviorInfoJson;
+
+    @Schema(description = "关系拓扑 JSON 字符串")
+    private String topologyInfoJson;
+
     @Schema(description = "创建时间")
     private LocalDateTime createTime;
+    private String llmReportJson;
+    private String advancedAnalysisJson;
 }
 

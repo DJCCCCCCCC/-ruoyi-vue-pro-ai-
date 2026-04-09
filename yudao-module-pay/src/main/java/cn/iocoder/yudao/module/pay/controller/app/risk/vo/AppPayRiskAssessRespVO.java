@@ -1,6 +1,8 @@
 package cn.iocoder.yudao.module.pay.controller.app.risk.vo;
 
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskRelationTopology;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -39,4 +41,12 @@ public class AppPayRiskAssessRespVO {
     @Schema(description = "Payment relation topology")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private PayRiskRelationTopology topologyInfo;
+
+    @Schema(description = "LLM risk analysis report")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private PayRiskLlmAnalysisReport llmReport;
+
+    @Schema(description = "Advanced risk analysis")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private PayRiskAdvancedAnalysis advancedAnalysis;
 }

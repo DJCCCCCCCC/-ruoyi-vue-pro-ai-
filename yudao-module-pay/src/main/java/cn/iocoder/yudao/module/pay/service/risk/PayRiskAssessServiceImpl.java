@@ -12,10 +12,14 @@ import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAdvancedAnalysisBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -135,6 +139,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             log.info("[assess] ✅ 已将格式化的 Whois 详情加入 deepAnalysis");
         }
 
+        respVO.setLlmReport(buildLlmAnalysisReport(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode));
+        respVO.setAdvancedAnalysis(buildAdvancedAnalysis(paymentData, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
+
         saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
         return respVO;
     }
@@ -152,6 +159,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("whoisInfo", respVO.getWhoisInfo());
         result.put("behaviorInfo", respVO.getBehaviorInfo());
         result.put("topologyInfo", respVO.getTopologyInfo());
+        result.put("llmReport", respVO.getLlmReport());
+        result.put("advancedAnalysis", respVO.getAdvancedAnalysis());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 
@@ -271,6 +280,60 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return root;
     }
 
+    private PayRiskLlmAnalysisReport buildLlmAnalysisReport(JsonNode paymentMaskedJsonNode,
+                                                            JsonNode ipInfoMaskedJsonNode,
+                                                            AppPayRiskAssessRespVO respVO,
+                                                            JsonNode whoisInfoNode) {
+        JsonNode contextNode = buildLlmContext(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode);
+        try {
+            PayRiskLlmAnalysisReport report = deepSeekClient.generateRiskReport(JsonUtils.toJsonString(contextNode));
+            if (report != null && (report.getMode() == null || report.getMode().trim().isEmpty())) {
+                report.setMode("LLM");
+            }
+            return report;
+        } catch (Exception ex) {
+            log.warn("[buildLlmAnalysisReport] LLM 缁煎悎鐮旀壒澶辫触锛屼娇鐢ㄥ厹搴曟姤鍛?{}", ex.getMessage());
+            return PayRiskLlmReportFallbackBuilder.build(contextNode);
+        }
+    }
+
+    private JsonNode buildLlmContext(JsonNode paymentMaskedJsonNode,
+                                     JsonNode ipInfoMaskedJsonNode,
+                                     AppPayRiskAssessRespVO respVO,
+                                     JsonNode whoisInfoNode) {
+        ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
+
+        ObjectNode assessmentNode = root.putObject("assessment");
+        assessmentNode.put("riskScore", respVO.getRiskScore() == null ? 0 : respVO.getRiskScore());
+        assessmentNode.put("riskLevel", respVO.getRiskLevel() == null ? "LOW" : respVO.getRiskLevel());
+        assessmentNode.put("deepAnalysis", respVO.getDeepAnalysis() == null ? "" : respVO.getDeepAnalysis());
+        assessmentNode.putPOJO("riskFactors", respVO.getRiskFactors() == null ? new ArrayList<>() : respVO.getRiskFactors());
+
+        if (paymentMaskedJsonNode != null && !paymentMaskedJsonNode.isNull()) {
+            root.set("paymentData", paymentMaskedJsonNode);
+        }
+        if (ipInfoMaskedJsonNode != null && !ipInfoMaskedJsonNode.isNull()) {
+            root.set("ipInfo", ipInfoMaskedJsonNode);
+        }
+        if (respVO.getBehaviorInfo() != null && !respVO.getBehaviorInfo().isNull()) {
+            root.set("behavior", respVO.getBehaviorInfo());
+        }
+        if (respVO.getTopologyInfo() != null) {
+            root.set("topology", JsonUtils.parseTree(JsonUtils.toJsonString(respVO.getTopologyInfo())));
+        }
+        if (whoisInfoNode != null && !whoisInfoNode.isNull()) {
+            root.set("whois", whoisInfoNode);
+        }
+        return root;
+    }
+
+    private PayRiskAdvancedAnalysis buildAdvancedAnalysis(JsonNode paymentData,
+                                                          JsonNode ipInfoMaskedJsonNode,
+                                                          JsonNode whoisInfoNode,
+                                                          AppPayRiskAssessRespVO respVO) {
+        return PayRiskAdvancedAnalysisBuilder.build(paymentData, ipInfoMaskedJsonNode, whoisInfoNode, respVO);
+    }
+
     private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
                                   AppPayRiskAssessRespVO respVO) {
         JsonNode paymentData = reqVO.getPaymentData();
@@ -284,7 +347,17 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         record.setRiskFactorsJson(JsonUtils.toJsonString(respVO.getRiskFactors()));
         record.setPaymentDataJson(JsonUtils.toJsonString(paymentData));
         record.setIpInfoJson(JsonUtils.toJsonString(ipInfoMaskedJsonNode));
-        payRiskAssessRecordMapper.insert(record);
+        record.setWhoisInfoJson(respVO.getWhoisInfo());
+        record.setBehaviorInfoJson(JsonUtils.toJsonString(respVO.getBehaviorInfo()));
+        record.setTopologyInfoJson(JsonUtils.toJsonString(respVO.getTopologyInfo()));
+        record.setLlmReportJson(JsonUtils.toJsonString(respVO.getLlmReport()));
+        record.setAdvancedAnalysisJson(JsonUtils.toJsonString(respVO.getAdvancedAnalysis()));
+        try {
+            payRiskAssessRecordMapper.insert(record);
+        } catch (Exception ex) {
+            log.warn("[saveAssessRecord] 风险分析结果保存失败，将跳过落库但继续返回分析结果。scene={}, source={}, error={}",
+                    record.getScene(), record.getSource(), ex.getMessage(), ex);
+        }
     }
 
     private PayRiskAssessAiResponse mergeExternalRisk(PayRiskAssessAiResponse baseResp,

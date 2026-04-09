@@ -17,6 +17,33 @@
       </article>
     </div>
 
+    <div class="toolbar">
+      <label class="search-box">
+        <span>节点搜索</span>
+        <input v-model.trim="searchKeyword" type="text" placeholder="名称、账号、设备、IP" />
+      </label>
+      <button type="button" :class="['toolbar-btn', { active: onlyRisk }]" @click="onlyRisk = !onlyRisk">
+        只看风险节点
+      </button>
+      <button
+        v-for="type in availableNodeTypes"
+        :key="type"
+        type="button"
+        :class="['toolbar-btn', { active: activeTypes.includes(type) }]"
+        @click="toggleNodeType(type)"
+      >
+        {{ typeLabelMap[type] || type }}
+      </button>
+      <button
+        v-if="searchKeyword || onlyRisk || activeTypes.length || activeSignalCode"
+        type="button"
+        class="toolbar-btn toolbar-btn-reset"
+        @click="resetFilters"
+      >
+        清空筛选
+      </button>
+    </div>
+
     <div class="content-grid">
       <div class="chart-shell">
         <div class="chart-meta">
@@ -63,11 +90,44 @@
           </template>
           <p v-else class="empty-text">点击图中的节点，可查看角色、交易金额和属性信息。</p>
         </article>
+        <article class="info-card">
+          <p class="card-title">Signal Focus</p>
+          <template v-if="activeSignalDetail">
+            <strong class="detail-name">{{ activeSignalDetail.title }}</strong>
+            <p class="detail-role">{{ activeSignalDetail.description }}</p>
+            <div class="chip-row">
+              <span class="chip">{{ activeSignalDetail.scoreLabel }}</span>
+              <span class="chip">{{ activeSignalDetail.nodeLabel }}</span>
+              <span class="chip">{{ activeSignalDetail.edgeLabel }}</span>
+            </div>
+            <div class="detail-list">
+              <span v-for="item in activeSignalDetail.nodes" :key="item">{{ item }}</span>
+            </div>
+          </template>
+          <p v-else class="empty-text">Click a signal card below to focus related nodes and links.</p>
+        </article>
+
+        <article class="info-card">
+          <p class="card-title">High Risk Nodes</p>
+          <div v-if="topRiskNodes.length" class="risk-node-list">
+            <div v-for="item in topRiskNodes" :key="item.id" class="risk-node-item">
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.riskLabel }}</span>
+              <p>{{ item.caption }}</p>
+            </div>
+          </div>
+          <p v-else class="empty-text">No additional high risk nodes are highlighted in the current view.</p>
+        </article>
       </aside>
     </div>
 
     <div v-if="signalCards.length" class="signal-grid">
-      <article v-for="signal in signalCards" :key="signal.code" :class="['signal-card', `tone-${signal.tone}`]">
+      <article
+        v-for="signal in signalCards"
+        :key="signal.code"
+        :class="['signal-card', `tone-${signal.tone}`, { active: activeSignalCode === signal.code }]"
+        @click="toggleSignal(signal.code)"
+      >
         <div class="signal-head">
           <strong>{{ signal.title }}</strong>
           <span>{{ signal.badge }}</span>
@@ -97,9 +157,23 @@ const chartRef = ref<HTMLDivElement>()
 let chartInstance: ECharts | null = null
 
 const selectedNodeId = ref('')
+const searchKeyword = ref('')
+const onlyRisk = ref(false)
+const activeSignalCode = ref('')
+const activeTypes = ref<string[]>([])
 
 const toneMap: Record<string, Tone> = { LOW: 'safe', MEDIUM: 'neutral', HIGH: 'warn', CRITICAL: 'warn' }
 const riskLabelMap: Record<string, string> = { LOW: '低风险', MEDIUM: '中风险', HIGH: '高风险', CRITICAL: '极高风险' }
+const typeLabelMap: Record<string, string> = {
+  PARTICIPANT: '人物',
+  DEVICE: '设备',
+  IP: 'IP',
+  PHONE: '手机号',
+  CARD: '卡号',
+  ACCOUNT: '账户',
+  EMAIL: '邮箱',
+  MERCHANT: '商户'
+}
 
 const normalizeText = (value: unknown) => (value === null || value === undefined ? '' : String(value).trim())
 const shortText = (value: unknown, len = 14) => {
@@ -120,6 +194,7 @@ const formatAmount = (value: unknown) => {
   return Number.isFinite(amount) ? `￥${amount.toLocaleString('zh-CN')}` : `￥${value}`
 }
 const resolveTone = (level?: string): Tone => toneMap[level || 'LOW'] || 'neutral'
+const riskRank = (level?: string) => ({ CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 }[level || 'LOW'] || 0)
 
 const buildFallbackTopology = (paymentData?: Record<string, any> | null): PayRiskRelationTopology | undefined => {
   if (!paymentData) return undefined
@@ -221,10 +296,43 @@ const buildFallbackTopology = (paymentData?: Record<string, any> | null): PayRis
 }
 
 const topologyData = computed(() => props.topology || buildFallbackTopology(props.paymentData))
-const nodes = computed(() => topologyData.value?.nodes ?? [])
-const edges = computed(() => topologyData.value?.edges ?? [])
+const rawNodes = computed(() => topologyData.value?.nodes ?? [])
+const rawEdges = computed(() => topologyData.value?.edges ?? [])
 const signals = computed(() => topologyData.value?.signals ?? [])
-const hasTopology = computed(() => nodes.value.length > 0)
+const hasTopology = computed(() => rawNodes.value.length > 0)
+const availableNodeTypes = computed(() =>
+  Array.from(new Set(rawNodes.value.map((node) => node.type).filter(Boolean))).sort()
+)
+const activeSignal = computed(() => signals.value.find((item) => item.code === activeSignalCode.value))
+const highlightedNodeIds = computed(() => new Set(activeSignal.value?.relatedNodeIds || []))
+const nodes = computed(() => {
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  return rawNodes.value.filter((node) => {
+    if (onlyRisk.value && !['HIGH', 'CRITICAL'].includes(node.riskLevel || '')) {
+      return false
+    }
+    if (activeTypes.value.length && !activeTypes.value.includes(node.type)) {
+      return false
+    }
+    if (!keyword) {
+      return true
+    }
+    const searchable = [
+      node.label,
+      node.id,
+      node.type,
+      ...(node.meta ? Object.values(node.meta).map((item) => normalizeText(item)) : [])
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return searchable.includes(keyword)
+  })
+})
+const visibleNodeIds = computed(() => new Set(nodes.value.map((node) => node.id)))
+const edges = computed(() =>
+  rawEdges.value.filter((edge) => visibleNodeIds.value.has(edge.source) && visibleNodeIds.value.has(edge.target))
+)
 
 watch(
   nodes,
@@ -270,6 +378,7 @@ const chartNodes = computed(() =>
     const amount = amountMap.value.get(node.id) || 0
     const relationCount = relationCountMap.value.get(node.id) || 0
     const symbolSize = isParticipant ? 72 + Math.min(relationCount * 3, 18) : 46 + Math.min(relationCount * 2, 10)
+    const isHighlighted = !activeSignalCode.value || highlightedNodeIds.value.has(node.id)
     const baseColor = isPayer ? '#0ea5e9' : isPayee ? '#f97316' : '#94a3b8'
     const borderColor = tone === 'warn' ? '#dc2626' : tone === 'neutral' ? '#d97706' : baseColor
     const shadowColor =
@@ -288,7 +397,8 @@ const chartNodes = computed(() =>
         borderColor,
         borderWidth: tone === 'warn' ? 3 : 2,
         shadowBlur: tone === 'warn' ? 28 : 18,
-        shadowColor
+        shadowColor,
+        opacity: isHighlighted ? 1 : 0.24
       },
       label: {
         show: true,
@@ -321,6 +431,10 @@ const chartLinks = computed(() =>
     const amountLabel = formatAmount(edge.amount)
     const sceneLabel = normalizeText(edge.meta?.scene)
     const relationLabel = normalizeText(edge.meta?.relationLabel || edge.label)
+    const isHighlighted =
+      !activeSignalCode.value ||
+      highlightedNodeIds.value.has(edge.source) ||
+      highlightedNodeIds.value.has(edge.target)
     return {
       id: `${edge.source}-${edge.target}-${index}`,
       source: edge.source,
@@ -330,7 +444,7 @@ const chartLinks = computed(() =>
         color,
         width: edge.type === 'TRANSFER' ? 2.8 + Math.min((Number(edge.amount) || 0) / 2000, 2) : 1.8,
         curveness: edge.type === 'TRANSFER' ? 0.22 : 0.08,
-        opacity: 0.92
+        opacity: isHighlighted ? 0.92 : 0.14
       },
       label: {
         show: edge.type === 'TRANSFER',
@@ -358,13 +472,21 @@ const summaryCards = computed(() => [
   { label: '参与节点', value: topologyData.value?.summary?.nodeCount || 0, caption: '付款人、收款人和共享属性节点总数' },
   { label: '关系连线', value: topologyData.value?.summary?.edgeCount || 0, caption: `${topologyData.value?.summary?.sharedAttributeCount || 0} 个共享属性连接` },
   { label: '交易笔数', value: topologyData.value?.summary?.transactionCount || 0, caption: totalAmount.value ? `总交易额 ${formatAmount(totalAmount.value)}` : '未识别交易金额' },
-  { label: '风险信号', value: topologyData.value?.summary?.signalCount || 0, caption: overallLabel.value }
+  {
+    label: '风险信号',
+    value: topologyData.value?.summary?.signalCount || 0,
+    caption: `${overallLabel.value} · 高风险节点 ${topologyData.value?.summary?.highRiskNodeCount || 0}`
+  }
 ])
 
 const relationHighlights = computed(() =>
   edges.value
     .filter((edge) => edge.type === 'TRANSFER')
-    .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))
+    .sort((a, b) => {
+      const rankDiff = riskRank(b.riskLevel) - riskRank(a.riskLevel)
+      if (rankDiff !== 0) return rankDiff
+      return (Number(b.amount) || 0) - (Number(a.amount) || 0)
+    })
     .slice(0, 4)
     .map((edge, index) => ({
       id: `${edge.source}-${edge.target}-${index}`,
@@ -377,6 +499,44 @@ const relationHighlights = computed(() =>
 
 const signalCards = computed(() => signals.value.map((item) => ({ ...item, tone: resolveTone(item.level), badge: `+${item.score || 0}` })))
 const nodeMap = computed(() => Object.fromEntries(nodes.value.map((node) => [node.id, node])))
+const activeSignalEdgeCount = computed(
+  () =>
+    edges.value.filter(
+      (edge) => highlightedNodeIds.value.has(edge.source) || highlightedNodeIds.value.has(edge.target)
+    ).length
+)
+const activeSignalDetail = computed(() => {
+  if (!activeSignal.value) return null
+  const relatedNodes = (activeSignal.value.relatedNodeIds || [])
+    .map((id) => nodeMap.value[id])
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((node) => `${node.label} / ${typeLabelMap[node.type] || node.type}`)
+  return {
+    title: activeSignal.value.title,
+    description: activeSignal.value.description,
+    scoreLabel: `+${activeSignal.value.score || 0} weight`,
+    nodeLabel: `${highlightedNodeIds.value.size} related nodes`,
+    edgeLabel: `${activeSignalEdgeCount.value} related links`,
+    nodes: relatedNodes
+  }
+})
+const topRiskNodes = computed(() =>
+  nodes.value
+    .filter((node) => ['HIGH', 'CRITICAL'].includes(node.riskLevel || ''))
+    .sort((a, b) => {
+      const rankDiff = riskRank(b.riskLevel) - riskRank(a.riskLevel)
+      if (rankDiff !== 0) return rankDiff
+      return (relationCountMap.value.get(b.id) || 0) - (relationCountMap.value.get(a.id) || 0)
+    })
+    .slice(0, 5)
+    .map((node) => ({
+      id: node.id,
+      label: node.label,
+      riskLabel: riskLabelMap[node.riskLevel || 'LOW'] || 'LOW',
+      caption: `${typeLabelMap[node.type] || node.type} / ${relationCountMap.value.get(node.id) || 0} links`
+    }))
+)
 
 const selectedNodeDetail = computed(() => {
   const node = nodes.value.find((item) => item.id === selectedNodeId.value)
@@ -407,7 +567,34 @@ const selectedNodeDetail = computed(() => {
   }
 })
 
-const chartMeta = computed(() => `交易 ${topologyData.value?.summary?.transactionCount || 0} 笔，节点 ${nodes.value.length} 个，异常信号 ${signals.value.length} 条`)
+const chartMeta = computed(() => {
+  const filterText = [
+    searchKeyword.value ? `搜索“${searchKeyword.value}”` : '',
+    onlyRisk.value ? '仅风险节点' : '',
+    activeTypes.value.length ? `${activeTypes.value.length} 类节点` : '',
+    activeSignal.value ? `聚焦 ${activeSignal.value.title}` : ''
+  ]
+    .filter(Boolean)
+    .join(' / ')
+  return `交易 ${topologyData.value?.summary?.transactionCount || 0} 笔，节点 ${nodes.value.length} 个，异常信号 ${signals.value.length} 条${filterText ? ` · ${filterText}` : ''}`
+})
+
+const toggleNodeType = (type: string) => {
+  activeTypes.value = activeTypes.value.includes(type)
+    ? activeTypes.value.filter((item) => item !== type)
+    : [...activeTypes.value, type]
+}
+
+const toggleSignal = (code: string) => {
+  activeSignalCode.value = activeSignalCode.value === code ? '' : code
+}
+
+const resetFilters = () => {
+  searchKeyword.value = ''
+  onlyRisk.value = false
+  activeTypes.value = []
+  activeSignalCode.value = ''
+}
 
 const chartOption = computed<EChartsOption>(() => ({
   backgroundColor: 'transparent',
@@ -600,6 +787,57 @@ onBeforeUnmount(() => {
   margin-top: 16px;
 }
 
+.toolbar {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.search-box {
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #6d8599;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.search-box input {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  color: #12202f;
+  outline: none;
+}
+
+.toolbar-btn {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #365167;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.toolbar-btn.active {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.28);
+  color: #0369a1;
+}
+
+.toolbar-btn-reset {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
+}
+
 .summary-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -745,6 +983,57 @@ onBeforeUnmount(() => {
 
 .signal-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.signal-card {
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.signal-card.active {
+  transform: translateY(-2px);
+  border-color: rgba(14, 165, 233, 0.28);
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.12);
+}
+
+.risk-node-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.risk-node-item {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(248, 251, 255, 0.84);
+}
+
+.risk-node-item strong,
+.risk-node-item span {
+  display: block;
+}
+
+.risk-node-item strong {
+  color: #12202f;
+  font-size: 13px;
+}
+
+.risk-node-item span {
+  margin-top: 4px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.risk-node-item p {
+  margin: 8px 0 0;
+  color: #556d80;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 @media (max-width: 1280px) {

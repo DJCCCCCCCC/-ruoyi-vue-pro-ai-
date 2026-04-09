@@ -20,6 +20,48 @@ export interface PayRiskAssessRespVO {
   whoisInfo?: any
   behaviorInfo?: any
   topologyInfo?: PayRiskRelationTopology
+  llmReport?: PayRiskLlmReport
+  advancedAnalysis?: PayRiskAdvancedAnalysis
+}
+
+export interface PayRiskLlmReport {
+  mode?: string
+  summary?: string
+  verdict?: string
+  confidence?: 'LOW' | 'MEDIUM' | 'HIGH' | string
+  evidence?: string[]
+  suspiciousEntities?: string[]
+  recommendations?: string[]
+}
+
+export interface PayRiskAdvancedAnalysis {
+  timeline?: Array<{
+    stage?: string
+    title?: string
+    description?: string
+    riskDelta?: number
+    evidenceLevel?: string
+  }>
+  counterfactuals?: Array<{
+    title?: string
+    hypothesis?: string
+    expectedRiskScore?: number
+    delta?: number
+    reason?: string
+  }>
+  universe?: {
+    summary?: string
+    repeatedIndicators?: string[]
+    watchList?: string[]
+    campaignHints?: string[]
+  }
+  interventions?: Array<{
+    priority?: string
+    type?: string
+    title?: string
+    description?: string
+    automationLevel?: string
+  }>
 }
 
 export interface PayRiskRelationTopology {
@@ -32,6 +74,9 @@ export interface PayRiskRelationTopology {
     transactionCount?: number
     signalCount?: number
     sharedAttributeCount?: number
+    highRiskNodeCount?: number
+    highRiskEdgeCount?: number
+    suspiciousClusterCount?: number
   }
   nodes?: Array<{
     id: string
@@ -73,6 +118,11 @@ export interface PayRiskAssessRecordVO {
   deepAnalysis?: string
   paymentDataJson?: string
   ipInfoJson?: string
+  whoisInfoJson?: string
+  behaviorInfoJson?: string
+  topologyInfoJson?: string
+  llmReportJson?: string
+  advancedAnalysisJson?: string
   createTime: string
 }
 

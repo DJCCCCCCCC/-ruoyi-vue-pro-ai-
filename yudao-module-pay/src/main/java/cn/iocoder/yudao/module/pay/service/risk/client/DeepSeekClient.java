@@ -5,6 +5,8 @@ import cn.hutool.http.HttpUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPromptBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
@@ -50,16 +52,38 @@ public class DeepSeekClient {
         // DeepSeek 默认兼容 OpenAI：使用 Authorization: Bearer xxx
         Map<String, Object> reqBody = buildRequestBody(userPrompt, true);
         try {
-            return doCall(url, reqBody);
+            return doCall(url, reqBody, PayRiskAssessAiResponse.class);
         } catch (Exception firstEx) {
             // 有些账号/版本不支持 response_format，第二次不传该字段
             log.warn("[DeepSeekClient][assess] 第一次调用失败，重试(不含 response_format)：{}", firstEx.getMessage());
             reqBody = buildRequestBody(userPrompt, false);
-            return doCall(url, reqBody);
+            return doCall(url, reqBody, PayRiskAssessAiResponse.class);
+        }
+    }
+
+    public PayRiskLlmAnalysisReport generateRiskReport(String contextJson) {
+        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
+        }
+
+        String userPrompt = PayRiskLlmReportPromptBuilder.buildUserPrompt(contextJson);
+        String url = baseUrl + "/chat/completions";
+
+        Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, true);
+        try {
+            return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
+        } catch (Exception firstEx) {
+            log.warn("[DeepSeekClient][generateRiskReport] 绗竴娆¤皟鐢ㄥけ璐ワ紝閲嶈瘯(涓嶅惈 response_format)锛歿}", firstEx.getMessage());
+            reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, false);
+            return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
         }
     }
 
     private Map<String, Object> buildRequestBody(String userPrompt, boolean withResponseFormat) {
+        return buildRequestBody(userPrompt, PayRiskPromptBuilder.SYSTEM_PROMPT, withResponseFormat);
+    }
+
+    private Map<String, Object> buildRequestBody(String userPrompt, String systemPrompt, boolean withResponseFormat) {
         Map<String, Object> req = new HashMap<>();
         req.put("model", model);
         req.put("temperature", temperature);
@@ -67,7 +91,7 @@ public class DeepSeekClient {
 
         Map<String, Object> system = new HashMap<>();
         system.put("role", "system");
-        system.put("content", PayRiskPromptBuilder.SYSTEM_PROMPT);
+        system.put("content", systemPrompt);
         Map<String, Object> user = new HashMap<>();
         user.put("role", "user");
         user.put("content", userPrompt);
@@ -82,7 +106,7 @@ public class DeepSeekClient {
         return req;
     }
 
-    private PayRiskAssessAiResponse doCall(String url, Map<String, Object> reqBody) {
+    private <T> T doCall(String url, Map<String, Object> reqBody, Class<T> resultType) {
         try (HttpResponse response = HttpUtil.createPost(url)
                 .header("Authorization", "Bearer " + deepseekApiKey)
                 .header("Content-Type", "application/json")
@@ -98,11 +122,20 @@ public class DeepSeekClient {
             }
 
             String jsonText = extractJsonObject(content);
-            PayRiskAssessAiResponse result = JsonUtils.parseObject(jsonText, PayRiskAssessAiResponse.class);
-            if (result.getRiskScore() == null
-                    || result.getRiskLevel() == null
-                    || result.getDeepAnalysis() == null) {
-                throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
+            T result = JsonUtils.parseObject(jsonText, resultType);
+            if (result instanceof PayRiskAssessAiResponse) {
+                PayRiskAssessAiResponse aiResponse = (PayRiskAssessAiResponse) result;
+                if (aiResponse.getRiskScore() == null
+                        || aiResponse.getRiskLevel() == null
+                        || aiResponse.getDeepAnalysis() == null) {
+                    throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
+                }
+            }
+            if (result instanceof PayRiskLlmAnalysisReport) {
+                PayRiskLlmAnalysisReport report = (PayRiskLlmAnalysisReport) result;
+                if (report.getSummary() == null || report.getVerdict() == null) {
+                    throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
+                }
             }
             return result;
         } catch (Exception e) {

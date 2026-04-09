@@ -27,6 +27,9 @@ public class PayRiskRelationTopology {
         private Integer transactionCount;
         private Integer signalCount;
         private Integer sharedAttributeCount;
+        private Integer highRiskNodeCount;
+        private Integer highRiskEdgeCount;
+        private Integer suspiciousClusterCount;
     }
 
     @Data

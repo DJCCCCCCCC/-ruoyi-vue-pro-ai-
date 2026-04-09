@@ -57,6 +57,9 @@
           </div>
         </ContentWrap>
 
+        <LlmRiskReportPanel :report="result?.llmReport" />
+        <AdvancedRiskAnalysisPanel :analysis="result?.advancedAnalysis" />
+
         <ThreatIntelPanel
           v-if="result"
           :ip-info="result?.ipInfo"
@@ -134,6 +137,8 @@
 import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
+import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
+import LlmRiskReportPanel from './components/LlmRiskReportPanel.vue'
 import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
 import ThreatIntelPanel from './components/ThreatIntelPanel.vue'
 import {
@@ -319,7 +324,11 @@ const handleUseRecord = (record: PayRiskAssessRecordVO) => {
     deepAnalysis: record.deepAnalysis || '',
     riskFactors: parseJsonText(record.riskFactorsJson, []),
     ipInfo: parseJsonText(record.ipInfoJson, {}),
-    topologyInfo: undefined
+    whoisInfo: record.whoisInfoJson || undefined,
+    behaviorInfo: parseJsonText(record.behaviorInfoJson, undefined),
+    topologyInfo: parseJsonText(record.topologyInfoJson, undefined),
+    llmReport: parseJsonText(record.llmReportJson, undefined),
+    advancedAnalysis: parseJsonText(record.advancedAnalysisJson, undefined)
   }
 }
 

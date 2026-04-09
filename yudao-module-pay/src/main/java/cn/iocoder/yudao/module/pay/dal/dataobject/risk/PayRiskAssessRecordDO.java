@@ -55,4 +55,23 @@ public class PayRiskAssessRecordDO extends BaseDO {
      * 脱敏后的 IP 情报 JSON 字符串
      */
     private String ipInfoJson;
+
+    /**
+     * Whois 情报 JSON 字符串
+     */
+    private String whoisInfoJson;
+
+    /**
+     * 生物行为分析 JSON 字符串
+     */
+    private String behaviorInfoJson;
+
+    /**
+     * 关系拓扑 JSON 字符串
+     */
+    private String topologyInfoJson;
+
+    private String llmReportJson;
+
+    private String advancedAnalysisJson;
 }

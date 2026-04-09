@@ -73,8 +73,10 @@ public class PayRiskRelationTopologyAnalyzer {
             if (payee != null) {
                 builder.bindAttributes(payeeNodeId, payee.getAttributes(), "PAYEE");
             }
+            builder.captureTransactionContext(paymentData, payerNodeId, payeeNodeId, relationLabel, transaction.getPayload());
         }
 
+        builder.analyzeConversationContext(paymentData);
         builder.analyzeSignals();
         return builder.build();
     }
@@ -302,6 +304,55 @@ public class PayRiskRelationTopologyAnalyzer {
         return normalized.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
     }
 
+    private static int readIntValue(JsonNode node, String fieldName, int defaultValue) {
+        JsonNode field = findField(node, fieldName);
+        if (field == null || field.isNull()) {
+            return defaultValue;
+        }
+        if (field.isInt() || field.isLong()) {
+            return field.asInt();
+        }
+        if (field.isTextual()) {
+            try {
+                return Integer.parseInt(field.asText().trim());
+            } catch (Exception ignored) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
+    }
+
+    private static List<String> readTextArray(JsonNode node, String fieldName) {
+        JsonNode field = findField(node, fieldName);
+        if (field == null || field.isNull() || !field.isArray()) {
+            return Collections.emptyList();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : field) {
+            if (item != null && item.isValueNode()) {
+                String value = normalizeText(item.asText());
+                if (value != null) {
+                    values.add(value);
+                }
+            }
+        }
+        return values;
+    }
+
+    private static boolean containsKeyword(String text, String... keywords) {
+        String normalized = normalizeText(text);
+        if (normalized == null) {
+            return false;
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        for (String keyword : keywords) {
+            if (lower.contains(keyword.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static List<String> deduplicate(List<String> items) {
         return new ArrayList<String>(new LinkedHashSet<String>(items));
     }
@@ -310,6 +361,7 @@ public class PayRiskRelationTopologyAnalyzer {
         private final Map<String, PayRiskRelationTopology.Node> nodes = new LinkedHashMap<>();
         private final Map<String, PayRiskRelationTopology.Edge> edges = new LinkedHashMap<>();
         private final List<PayRiskRelationTopology.Signal> signals = new ArrayList<>();
+        private final Set<String> signalKeys = new LinkedHashSet<>();
         private final Map<String, Set<String>> outgoingTransfers = new LinkedHashMap<>();
         private final Map<String, Set<String>> incomingTransfers = new LinkedHashMap<>();
         private final Map<String, Set<String>> attributeBindings = new LinkedHashMap<>();
@@ -435,10 +487,86 @@ public class PayRiskRelationTopologyAnalyzer {
             incomingTransfers.computeIfAbsent(target, key -> new LinkedHashSet<String>()).add(source);
         }
 
+        private void captureTransactionContext(JsonNode paymentData, String payerNodeId, String payeeNodeId,
+                                               String relationLabel, JsonNode transactionPayload) {
+            if (payerNodeId == null && payeeNodeId == null) {
+                return;
+            }
+            String scene = firstText(paymentData, "scene", "source");
+            String relationType = firstText(transactionPayload, "relationType", "relationLabel", "scenarioTag");
+            String latestPeerMessage = firstText(paymentData, "latestPeerMessage");
+            String narrativeText = String.join(" ",
+                    Arrays.asList(
+                            normalizeText(scene),
+                            normalizeText(relationLabel),
+                            normalizeText(relationType),
+                            normalizeText(latestPeerMessage)
+                    ));
+            List<String> relatedNodeIds = mergeNodeIds(payerNodeId, payeeNodeId);
+            if (containsKeyword(narrativeText, "客服", "refund", "退款", "verify", "验证", "customer_service", "fake_customer_service")) {
+                addSignal("SOCIAL_ENGINEERING_SCRIPT",
+                        "HIGH",
+                        "疑似冒充客服或退款话术",
+                        "交易关系和上下文中出现客服、退款或验证类话术，符合典型社工诱导特征。",
+                        12,
+                        relatedNodeIds);
+            }
+            if (containsKeyword(narrativeText, "紧急", "马上", "立刻", "立即", "财务", "high_pressure", "urgent")) {
+                addSignal("PRESSURED_TRANSFER_SCRIPT",
+                        "HIGH",
+                        "疑似高压催促转账",
+                        "上下文出现紧急、财务或立即处理等催促词，存在施压诱导付款风险。",
+                        10,
+                        relatedNodeIds);
+            }
+        }
+
+        private void analyzeConversationContext(JsonNode paymentData) {
+            if (paymentData == null || transactionCount <= 0) {
+                return;
+            }
+            List<String> allParticipants = collectParticipantNodeIds();
+            if (allParticipants.isEmpty()) {
+                return;
+            }
+            int messageCount = readIntValue(paymentData, "messageCount", 0);
+            List<String> links = readTextArray(paymentData, "links");
+            List<String> detectedSignals = readTextArray(paymentData, "detectedSignals");
+            String scene = firstText(paymentData, "scene");
+
+            if (messageCount > 0 && messageCount <= 6) {
+                addSignal("SHORT_CONVERSATION_PAYMENT",
+                        "MEDIUM",
+                        "短对话后快速转账",
+                        "在较短对话轮次内即进入付款链路，缺少充分核验过程。",
+                        8,
+                        allParticipants);
+            }
+            if (!links.isEmpty()) {
+                addSignal("LINK_GUIDED_PAYMENT",
+                        "MEDIUM",
+                        "链接引导后进入转账",
+                        "会话中存在支付或验证链接，并已形成资金关系链路。",
+                        8,
+                        allParticipants);
+            }
+            if (containsKeyword(scene, "chat_risk", "wechat_chat_risk") || detectedSignals.size() >= 2) {
+                addSignal("CHAT_RISK_PAYMENT_CHAIN",
+                        "HIGH",
+                        "聊天风险信号已进入支付链路",
+                        "聊天场景中已同时命中多项风险信号，并形成明确的付款人与收款人关系。",
+                        10,
+                        allParticipants);
+            }
+        }
+
         private void analyzeSignals() {
             analyzeSharedAttributes();
+            analyzeMultiSharedParticipants();
             analyzeMultiHopPayers();
             analyzeMultiSourcePayees();
+            analyzeHubIntermediaries();
+            analyzeCrossRoleParticipants();
             analyzeBidirectionalTransfers();
             refreshRiskLevels();
         }
@@ -458,6 +586,31 @@ public class PayRiskRelationTopologyAnalyzer {
                         entry.getValue().size() + " participants are bound to the same " + type.toLowerCase(Locale.ROOT) + ".",
                         score,
                         new ArrayList<String>(entry.getValue()));
+            }
+        }
+
+        private void analyzeMultiSharedParticipants() {
+            Map<String, Integer> participantSharedCounts = new LinkedHashMap<>();
+            Map<String, Set<String>> participantRelatedNodes = new LinkedHashMap<>();
+            for (Map.Entry<String, Set<String>> entry : attributeBindings.entrySet()) {
+                if (entry.getValue().size() < 2) {
+                    continue;
+                }
+                for (String participantId : entry.getValue()) {
+                    participantSharedCounts.put(participantId, participantSharedCounts.getOrDefault(participantId, 0) + 1);
+                    participantRelatedNodes.computeIfAbsent(participantId, key -> new LinkedHashSet<>()).addAll(entry.getValue());
+                }
+            }
+            for (Map.Entry<String, Integer> entry : participantSharedCounts.entrySet()) {
+                if (entry.getValue() < 2) {
+                    continue;
+                }
+                addSignal("MULTI_SHARED_ATTRIBUTES",
+                        "HIGH",
+                        "主体复用多个共享属性",
+                        "同一主体同时命中多个共享属性网络，存在设备、IP 或账户复用风险。",
+                        10,
+                        new ArrayList<>(participantRelatedNodes.getOrDefault(entry.getKey(), Collections.emptySet())));
             }
         }
 
@@ -512,6 +665,45 @@ public class PayRiskRelationTopologyAnalyzer {
             }
         }
 
+        private void analyzeHubIntermediaries() {
+            for (PayRiskRelationTopology.Node node : nodes.values()) {
+                if (!"PARTICIPANT".equalsIgnoreCase(node.getType())) {
+                    continue;
+                }
+                int incoming = incomingTransfers.getOrDefault(node.getId(), Collections.emptySet()).size();
+                int outgoing = outgoingTransfers.getOrDefault(node.getId(), Collections.emptySet()).size();
+                if ((incoming >= 2 && outgoing >= 1) || (incoming >= 1 && outgoing >= 2)) {
+                    Set<String> related = new LinkedHashSet<>();
+                    related.add(node.getId());
+                    related.addAll(incomingTransfers.getOrDefault(node.getId(), Collections.emptySet()));
+                    related.addAll(outgoingTransfers.getOrDefault(node.getId(), Collections.emptySet()));
+                    addSignal("MONEY_MULE_HUB",
+                            "HIGH",
+                            "疑似中转枢纽",
+                            "该主体同时承担收款与转出角色，形成明显的资金中转特征。",
+                            10,
+                            new ArrayList<>(related));
+                }
+            }
+        }
+
+        private void analyzeCrossRoleParticipants() {
+            for (PayRiskRelationTopology.Node node : nodes.values()) {
+                if (!"PARTICIPANT".equalsIgnoreCase(node.getType()) || node.getTags() == null) {
+                    continue;
+                }
+                if (node.getTags().contains("PAYER") && node.getTags().contains("PAYEE")
+                        && relationDegree(node.getId()) >= 3) {
+                    addSignal("CROSS_ROLE_PARTICIPANT",
+                            "MEDIUM",
+                            "主体跨角色频繁参与交易",
+                            "同一主体既是付款人又是收款人，且关联边较多，需关注是否存在代收代付行为。",
+                            7,
+                            Collections.singletonList(node.getId()));
+                }
+            }
+        }
+
         private void refreshRiskLevels() {
             Map<String, Integer> nodeScores = new LinkedHashMap<>();
             for (PayRiskRelationTopology.Signal signal : signals) {
@@ -532,13 +724,18 @@ public class PayRiskRelationTopologyAnalyzer {
         }
 
         private void addSignal(String code, String level, String title, String description, int score, List<String> relatedNodeIds) {
+            List<String> deduplicatedNodeIds = relatedNodeIds == null ? Collections.emptyList() : deduplicate(relatedNodeIds);
+            String signalKey = code + "|" + String.join(",", deduplicatedNodeIds);
+            if (!signalKeys.add(signalKey)) {
+                return;
+            }
             PayRiskRelationTopology.Signal signal = new PayRiskRelationTopology.Signal();
             signal.setCode(code);
             signal.setLevel(level);
             signal.setTitle(title);
             signal.setDescription(description);
             signal.setScore(score);
-            signal.setRelatedNodeIds(relatedNodeIds);
+            signal.setRelatedNodeIds(deduplicatedNodeIds);
             signals.add(signal);
         }
 
@@ -547,6 +744,31 @@ public class PayRiskRelationTopologyAnalyzer {
             nodeIds.add(center);
             nodeIds.addAll(neighbors);
             return nodeIds;
+        }
+
+        private List<String> mergeNodeIds(String... nodeIds) {
+            List<String> values = new ArrayList<>();
+            for (String nodeId : nodeIds) {
+                if (nodeId != null) {
+                    values.add(nodeId);
+                }
+            }
+            return values;
+        }
+
+        private List<String> collectParticipantNodeIds() {
+            List<String> participantIds = new ArrayList<>();
+            for (PayRiskRelationTopology.Node node : nodes.values()) {
+                if ("PARTICIPANT".equalsIgnoreCase(node.getType())) {
+                    participantIds.add(node.getId());
+                }
+            }
+            return participantIds;
+        }
+
+        private int relationDegree(String nodeId) {
+            return outgoingTransfers.getOrDefault(nodeId, Collections.emptySet()).size()
+                    + incomingTransfers.getOrDefault(nodeId, Collections.emptySet()).size();
         }
 
         private void addTag(PayRiskRelationTopology.Node node, String tag) {
@@ -577,6 +799,9 @@ public class PayRiskRelationTopologyAnalyzer {
             summary.setTransactionCount(transactionCount);
             summary.setSignalCount(signals.size());
             summary.setSharedAttributeCount(sharedAttributeCount);
+            summary.setHighRiskNodeCount(countNodesByRiskLevel("HIGH", "CRITICAL"));
+            summary.setHighRiskEdgeCount(countEdgesByRiskLevel("HIGH", "CRITICAL"));
+            summary.setSuspiciousClusterCount(countSuspiciousClusters());
             topology.setSummary(summary);
 
             int extraScore = 0;
@@ -615,7 +840,42 @@ public class PayRiskRelationTopologyAnalyzer {
             return count;
         }
 
+        private int countNodesByRiskLevel(String... levels) {
+            Set<String> levelSet = new LinkedHashSet<>(Arrays.asList(levels));
+            int count = 0;
+            for (PayRiskRelationTopology.Node node : nodes.values()) {
+                if (levelSet.contains(node.getRiskLevel())) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private int countEdgesByRiskLevel(String... levels) {
+            Set<String> levelSet = new LinkedHashSet<>(Arrays.asList(levels));
+            int count = 0;
+            for (PayRiskRelationTopology.Edge edge : edges.values()) {
+                if (levelSet.contains(edge.getRiskLevel())) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private int countSuspiciousClusters() {
+            int clusterCount = 0;
+            for (PayRiskRelationTopology.Signal signal : signals) {
+                if ("HIGH".equals(signal.getLevel()) || "CRITICAL".equals(signal.getLevel())) {
+                    clusterCount++;
+                }
+            }
+            return clusterCount;
+        }
+
         private String resolveRiskLevel(int score) {
+            if (score >= 30) {
+                return "CRITICAL";
+            }
             if (score >= 20) {
                 return "HIGH";
             }
