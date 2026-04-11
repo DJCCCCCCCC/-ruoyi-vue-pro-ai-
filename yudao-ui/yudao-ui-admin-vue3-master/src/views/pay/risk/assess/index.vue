@@ -1,104 +1,118 @@
-﻿<template>
+<template>
   <div class="risk-assess-page">
-    <div class="hero">
-      <div class="hero-copy">
+    <section class="hero">
+      <div class="hero-left">
         <p class="hero-kicker">支付风控工作台</p>
-        <h1>支付风险评估</h1>
-        <p class="hero-desc">输入支付上下文后快速评估风险等级，并在下方审阅提交记录。</p>
-      </div>
-      <div class="hero-stats">
-        <div class="stat-chip">
-          <span>当前风险等级</span>
-          <strong>{{ result?.riskLevel || '未分析' }}</strong>
-        </div>
-        <div class="stat-chip">
-          <span>已入库记录</span>
-          <strong>{{ recordTotal }}</strong>
-        </div>
-      </div>
-    </div>
+        <h1>风险评估中心</h1>
+        <p class="hero-desc">
+          聚焦结果查看与审计追踪。支持从历史记录快速回看评分、因子、情报与拓扑分析。
+        </p>
 
-    <div class="workspace">
-      <ContentWrap class="panel input-panel">
-        <el-form :model="form" label-position="top">
-          <el-form-item label="请求 IP">
-            <el-input v-model="form.ip" clearable placeholder="Optional, e.g. 8.8.8.8" />
-          </el-form-item>
-          <el-form-item label="待分析数据 JSON">
-            <el-input v-model="form.paymentDataJson" type="textarea" :rows="16" />
-          </el-form-item>
-          <div class="action-row">
-            <el-button type="primary" :loading="submitting" @click="handleAssess">开始分析</el-button>
-            <el-button @click="fillExample('normal')">正常样例</el-button>
-            <el-button @click="fillExample('chat')">聊天诈骗样例</el-button>
-            <el-button @click="handleReset">重置</el-button>
-          </div>
-        </el-form>
+      </div>
+    </section>
+
+    <section class="overview-grid">
+      <ContentWrap class="panel metric-card">
+        <span>风险评分</span>
+        <strong>{{ riskScore }}<small>/100</small></strong>
+        <el-progress :percentage="riskScore" :show-text="false" :stroke-width="10" />
       </ContentWrap>
 
-      <div class="right-col">
-        <ContentWrap class="panel metric-panel">
-          <div class="metric-grid">
-            <div class="metric-card">
-              <span>风险评分</span>
-              <strong>{{ riskScore }} <small>/100</small></strong>
-              <el-progress :percentage="riskScore" :show-text="false" :stroke-width="10" />
-            </div>
-            <div class="metric-card">
-              <span>风险等级</span>
-              <el-tag :type="riskTagType(result?.riskLevel)" size="large">
-                {{ result?.riskLevel || '未分析' }}
-              </el-tag>
-            </div>
-            <div class="metric-card">
-              <span>命中因子</span>
-              <strong>{{ result?.riskFactors?.length || 0 }}</strong>
-            </div>
+      <ContentWrap class="panel metric-card">
+        <span>风险等级</span>
+        <el-tag class="risk-level-tag" :type="riskTagType(selectedResult?.riskLevel)" size="large">
+          {{ selectedResult?.riskLevel || '未选择' }}
+        </el-tag>
+      </ContentWrap>
+
+      <ContentWrap class="panel metric-card">
+        <span>命中因子</span>
+        <strong>{{ riskFactorsCount }}</strong>
+      </ContentWrap>
+    </section>
+
+    <section class="dashboard-grid">
+      <ContentWrap class="panel chart-card">
+        <div class="panel-head">
+          <div>
+            <h3>风控等级分布</h3>
+            <p>基于当前记录统计各风险等级占比</p>
           </div>
-        </ContentWrap>
+        </div>
+        <div ref="riskLevelPieRef" class="chart-canvas"></div>
+      </ContentWrap>
 
-        <LlmRiskReportPanel :report="result?.llmReport" />
-        <AdvancedRiskAnalysisPanel :analysis="result?.advancedAnalysis" />
-
-        <ThreatIntelPanel
-          v-if="result"
-          :ip-info="result?.ipInfo"
-          :whois-info="result?.whoisInfo"
-          :payment-data="parsedPaymentObject"
-        />
-
-        <PaymentTopologyPanel :topology="result?.topologyInfo" :payment-data="parsedPaymentObject" />
-
-        <ContentWrap class="panel json-panel">
-          <div class="json-grid">
-            <div class="json-card">
-              <h3>分析结果 JSON</h3>
-              <pre class="json-block">{{ resultJson }}</pre>
-            </div>
-            <div class="json-card">
-              <h3>输入数据 JSON</h3>
-              <pre class="json-block">{{ parsedPreview }}</pre>
-            </div>
+      <ContentWrap class="panel chart-card geo-panel">
+        <div class="panel-head">
+          <div>
+            <h3>全球风险图（IP归属）</h3>
+            <p>按经纬度聚合风险来源，体现地理位置风控</p>
           </div>
-        </ContentWrap>
-      </div>
-    </div>
+        </div>
+        <div ref="globalRiskMapRef" class="chart-canvas geo-canvas"></div>
+      </ContentWrap>
+
+      <ContentWrap class="panel chart-card trend-panel">
+        <div class="panel-head">
+          <div>
+            <h3>24小时实时拦截趋势</h3>
+            <p>按小时统计高风险拦截事件（HIGH / CRITICAL）</p>
+          </div>
+        </div>
+        <div ref="interceptTrendRef" class="chart-canvas"></div>
+      </ContentWrap>
+    </section>
+
+    <section v-if="selectedResult" class="detail-stack">
+      <LlmRiskReportPanel :report="selectedResult?.llmReport" />
+      <AdvancedRiskAnalysisPanel :analysis="selectedResult?.advancedAnalysis" />
+
+      <ThreatIntelPanel
+        :ip-info="selectedResult?.ipInfo"
+        :whois-info="selectedResult?.whoisInfo"
+        :payment-data="selectedPaymentObject"
+      />
+
+      <PaymentTopologyPanel :topology="selectedResult?.topologyInfo" :payment-data="selectedPaymentObject" />
+
+      <ContentWrap class="panel json-panel">
+        <div class="panel-head">
+          <h3>JSON 对照</h3>
+          <p>用于回放风险分析全过程</p>
+        </div>
+        <div class="json-grid">
+          <div class="json-card">
+            <h4>分析结果</h4>
+            <pre class="json-block">{{ selectedResultJson }}</pre>
+          </div>
+          <div class="json-card">
+            <h4>输入数据</h4>
+            <pre class="json-block">{{ selectedPaymentJson }}</pre>
+          </div>
+        </div>
+      </ContentWrap>
+    </section>
 
     <ContentWrap class="panel table-panel">
-      <div class="table-header">
-        <div class="table-title">
+      <div class="panel-head table-head">
+        <div>
           <h3>分析记录</h3>
-          <span>最新记录优先显示</span>
+          <p>点击“查看”即可加载详情面板</p>
         </div>
-        <el-button
-          type="danger"
-          :loading="clearing"
-          :disabled="recordTotal === 0"
-          @click="handleClearRecords"
-        >
-          一键清空
-        </el-button>
+        <div class="table-actions">
+          <el-button type="primary" :loading="recordLoading" @click="refreshRecordList">刷新记录</el-button>
+          <el-button
+            type="danger"
+            plain
+            :loading="clearing"
+            :disabled="recordTotal === 0"
+            @click="handleClearRecords"
+          >
+            一键清空
+          </el-button>
+        </div>
       </div>
+
       <el-table v-loading="recordLoading" :data="recordList" :stripe="true" size="small">
         <el-table-column label="序号" width="90">
           <template #default="scope">
@@ -117,7 +131,7 @@
         <el-table-column label="分数" prop="riskScore" width="90" />
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="scope">
-            <el-button link type="primary" @click="handleUseRecord(scope.row)">使用</el-button>
+            <el-button link type="primary" @click="handleUseRecord(scope.row)">查看</el-button>
             <el-button link type="danger" @click="handleDeleteRecord(scope.row)">删除</el-button>
           </template>
         </el-table-column>
@@ -134,7 +148,9 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import * as echarts from 'echarts'
+import worldGeoJson from '@/assets/world.geo.json'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
@@ -142,111 +158,36 @@ import LlmRiskReportPanel from './components/LlmRiskReportPanel.vue'
 import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
 import ThreatIntelPanel from './components/ThreatIntelPanel.vue'
 import {
-  assessPayRisk,
   clearPayRiskAssessRecords,
   deletePayRiskAssessRecord,
   getPayRiskAssessRecordPage,
   type PayRiskAssessRecordVO,
-  type PayRiskAssessReqVO,
   type PayRiskAssessRespVO
 } from '@/api/pay/risk/assess'
 
 defineOptions({ name: 'PayRiskAssess' })
 
+echarts.registerMap('world', worldGeoJson as any)
+
 const message = useMessage()
-const submitting = ref(false)
 const recordLoading = ref(false)
 const clearing = ref(false)
 const recordTotal = ref(0)
 const recordList = ref<PayRiskAssessRecordVO[]>([])
+const selectedRecord = ref<PayRiskAssessRecordVO | null>(null)
+
+const riskLevelPieRef = ref<HTMLElement>()
+const interceptTrendRef = ref<HTMLElement>()
+const globalRiskMapRef = ref<HTMLElement>()
+
+let riskLevelPieChart: echarts.ECharts | null = null
+let interceptTrendChart: echarts.ECharts | null = null
+let globalRiskMapChart: echarts.ECharts | null = null
+
 const recordQuery = reactive({
   pageNo: 1,
   pageSize: 10
 })
-
-const examples: Record<string, { ip: string; paymentData: Record<string, unknown> }> = {
-  normal: {
-    ip: '8.8.8.8',
-    paymentData: {
-      scene: 'MINI_APP',
-      source: 'admin-risk-page',
-      orderNo: 'PAY202603300001',
-      amount: 99,
-      city: 'Shanghai'
-    }
-  },
-  chat: {
-    ip: '103.24.10.23',
-    paymentData: {
-      scene: 'WECHAT_CHAT_RISK',
-      source: 'chat-risk-test-page',
-      linkCount: 1,
-      latestPeerMessage: 'Please click refund link in 3 minutes',
-      links: ['https://pay-safe-refund.example.com/verify?id=8831'],
-      transactions: [
-        {
-          amount: 1888,
-          payer: {
-            userId: 'u-1001',
-            name: 'Alice',
-            mobile: '13800001111',
-            deviceId: 'device-9',
-            ip: '103.24.10.23'
-          },
-          payee: {
-            merchantNo: 'm-3001',
-            merchantName: 'Refund Service',
-            accountNo: 'acc-risk-01'
-          }
-        },
-        {
-          amount: 2999,
-          payer: {
-            userId: 'u-1002',
-            name: 'Bob',
-            mobile: '13800002222',
-            deviceId: 'device-9',
-            ip: '103.24.10.88'
-          },
-          payee: {
-            merchantNo: 'm-3001',
-            merchantName: 'Refund Service',
-            accountNo: 'acc-risk-01'
-          }
-        }
-      ]
-    }
-  }
-}
-
-const form = reactive({
-  ip: examples.chat.ip,
-  paymentDataJson: JSON.stringify(examples.chat.paymentData, null, 2)
-})
-
-const result = ref<PayRiskAssessRespVO | null>(null)
-const parsedPaymentObject = computed(() => parseJsonText(form.paymentDataJson, {}))
-
-const riskScore = computed(() => Math.min(Math.max(Number(result.value?.riskScore || 0), 0), 100))
-const resultJson = computed(() => (result.value ? JSON.stringify(result.value, null, 2) : '// no result'))
-
-const parsedPreview = computed(() => {
-  try {
-    return JSON.stringify(JSON.parse(form.paymentDataJson || '{}'), null, 2)
-  } catch {
-    return '// invalid json'
-  }
-})
-
-const fillExample = (key: keyof typeof examples) => {
-  form.ip = examples[key].ip
-  form.paymentDataJson = JSON.stringify(examples[key].paymentData, null, 2)
-}
-
-const handleReset = () => {
-  fillExample('chat')
-  result.value = null
-}
 
 const parseJsonText = (jsonText?: string, fallback: any = {}) => {
   if (!jsonText) return fallback
@@ -267,21 +208,310 @@ const unwrapRecordPage = (data: any): { list: PayRiskAssessRecordVO[]; total: nu
   return { list: [], total: 0 }
 }
 
+const selectedResult = computed<PayRiskAssessRespVO | null>(() => {
+  if (!selectedRecord.value) return null
+  const record = selectedRecord.value
+  return {
+    riskScore: record.riskScore,
+    riskLevel: record.riskLevel,
+    deepAnalysis: record.deepAnalysis || '',
+    riskFactors: parseJsonText(record.riskFactorsJson, []),
+    ipInfo: parseJsonText(record.ipInfoJson, {}),
+    whoisInfo: record.whoisInfoJson || undefined,
+    behaviorInfo: parseJsonText(record.behaviorInfoJson, undefined),
+    topologyInfo: parseJsonText(record.topologyInfoJson, undefined),
+    llmReport: parseJsonText(record.llmReportJson, undefined),
+    advancedAnalysis: parseJsonText(record.advancedAnalysisJson, undefined)
+  }
+})
+
+const selectedPaymentObject = computed(() => parseJsonText(selectedRecord.value?.paymentDataJson, {}))
+const selectedPaymentJson = computed(() => JSON.stringify(selectedPaymentObject.value, null, 2))
+const selectedResultJson = computed(() => JSON.stringify(selectedResult.value, null, 2))
+
+const riskScore = computed(() => Math.min(Math.max(Number(selectedResult.value?.riskScore || 0), 0), 100))
+const riskFactorsCount = computed(() => selectedResult.value?.riskFactors?.length || 0)
+
+const getHourLabel = (date: Date) => `${String(date.getHours()).padStart(2, '0')}:00`
+
+const riskLevelDistribution = computed(() => {
+  const levelCountMap: Record<string, number> = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 }
+  recordList.value.forEach((item) => {
+    const level = (item.riskLevel || '').toUpperCase()
+    if (levelCountMap[level] !== undefined) levelCountMap[level] += 1
+  })
+
+  return [
+    { name: 'LOW', value: levelCountMap.LOW },
+    { name: 'MEDIUM', value: levelCountMap.MEDIUM },
+    { name: 'HIGH', value: levelCountMap.HIGH },
+    { name: 'CRITICAL', value: levelCountMap.CRITICAL }
+  ]
+})
+
+const interceptTrendData = computed(() => {
+  const now = new Date()
+  const labels: string[] = []
+  const values = new Array(24).fill(0)
+
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 3600 * 1000)
+    labels.push(getHourLabel(d))
+  }
+
+  recordList.value.forEach((item) => {
+    const level = (item.riskLevel || '').toUpperCase()
+    if (!['HIGH', 'CRITICAL'].includes(level) || !item.createTime) return
+    const eventDate = new Date(item.createTime)
+    const diffHour = Math.floor((now.getTime() - eventDate.getTime()) / 3600_000)
+    if (diffHour >= 0 && diffHour < 24) {
+      const idx = 23 - diffHour
+      values[idx] += 1
+    }
+  })
+
+  return { labels, values }
+})
+
+const globalRiskPoints = computed(() => {
+  const fallbackPoints = [
+    { name: '北京', value: [116.4074, 39.9042, 9] },
+    { name: '新加坡', value: [103.8198, 1.3521, 7] },
+    { name: '伦敦', value: [-0.1276, 51.5072, 6] },
+    { name: '纽约', value: [-74.006, 40.7128, 8] },
+    { name: '东京', value: [139.6917, 35.6895, 5] }
+  ]
+
+  const countryCenterMap: Record<string, [number, number]> = {
+    CN: [104.1954, 35.8617],
+    US: [-98.5795, 39.8283],
+    SG: [103.8198, 1.3521],
+    JP: [138.2529, 36.2048],
+    GB: [-3.436, 55.3781],
+    DE: [10.4515, 51.1657],
+    FR: [2.2137, 46.2276],
+    IN: [78.9629, 20.5937],
+    RU: [105.3188, 61.524],
+    BR: [-51.9253, -14.235],
+    AU: [133.7751, -25.2744],
+    CA: [-106.3468, 56.1304],
+    KR: [127.7669, 35.9078],
+    HK: [114.1694, 22.3193],
+    TW: [121.5654, 25.033],
+    ID: [113.9213, -0.7893],
+    VN: [108.2772, 14.0583],
+    TH: [100.9925, 15.87],
+    MY: [101.9758, 4.2105],
+    PH: [121.774, 12.8797],
+    AE: [53.8478, 23.4241],
+    SA: [45.0792, 23.8859],
+    ZA: [22.9375, -30.5595],
+    NG: [8.6753, 9.082]
+  }
+
+  const points: Array<{ name: string; value: [number, number, number] }> = []
+  recordList.value.forEach((item) => {
+    const ipInfo = parseJsonText(item.ipInfoJson, {})
+
+    const lng = Number(
+      ipInfo?.lng ??
+        ipInfo?.lon ??
+        ipInfo?.longitude ??
+        ipInfo?.location?.lng ??
+        ipInfo?.location?.lon ??
+        ipInfo?.location?.longitude
+    )
+    const lat = Number(
+      ipInfo?.lat ??
+        ipInfo?.latitude ??
+        ipInfo?.location?.lat ??
+        ipInfo?.location?.latitude
+    )
+
+    const countryCode = String(ipInfo?.countryCode || ipInfo?.country_code || '').toUpperCase()
+    const countryName = String(ipInfo?.country || '').toUpperCase()
+    const countryCenter =
+      countryCenterMap[countryCode] ||
+      countryCenterMap[countryName] ||
+      countryCenterMap[item.ip?.slice(0, 2)?.toUpperCase() || '']
+
+    const finalLng = Number.isFinite(lng) ? lng : countryCenter?.[0]
+    const finalLat = Number.isFinite(lat) ? lat : countryCenter?.[1]
+    if (!Number.isFinite(finalLng) || !Number.isFinite(finalLat)) return
+
+    const level = (item.riskLevel || '').toUpperCase()
+    const weight = level === 'CRITICAL' ? 4 : level === 'HIGH' ? 3 : level === 'MEDIUM' ? 2 : 1
+    const placeName =
+      ipInfo?.city ||
+      ipInfo?.regionName ||
+      ipInfo?.country ||
+      countryCode ||
+      item.ip ||
+      '未知来源'
+
+    points.push({ name: placeName, value: [finalLng, finalLat, weight] })
+  })
+
+  return points.length > 0 ? points : fallbackPoints
+})
+
+const renderDashboardCharts = () => {
+  if (riskLevelPieRef.value) {
+    riskLevelPieChart?.dispose()
+    riskLevelPieChart = echarts.init(riskLevelPieRef.value)
+    riskLevelPieChart.setOption({
+      tooltip: { trigger: 'item' },
+      legend: { bottom: 0, icon: 'circle' },
+      series: [
+        {
+          type: 'pie',
+          radius: ['44%', '72%'],
+          center: ['50%', '46%'],
+          avoidLabelOverlap: true,
+          label: { formatter: '{b}\n{d}%' },
+          labelLine: { length: 10, length2: 8 },
+          itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+          data: riskLevelDistribution.value,
+          color: ['#6bcf8d', '#ffb020', '#ff7a45', '#e5484d']
+        }
+      ]
+    })
+  }
+
+  if (interceptTrendRef.value) {
+    interceptTrendChart?.dispose()
+    interceptTrendChart = echarts.init(interceptTrendRef.value)
+    interceptTrendChart.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 24, right: 18, top: 18, bottom: 28, containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: interceptTrendData.value.labels,
+        axisLabel: { color: '#607d9b', interval: 2 }
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: '#607d9b' },
+        splitLine: { lineStyle: { color: 'rgba(133,164,199,0.22)' } }
+      },
+      series: [
+        {
+          name: '拦截量',
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 7,
+          data: interceptTrendData.value.values,
+          lineStyle: { width: 3, color: '#4f87ff' },
+          itemStyle: { color: '#4f87ff' },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(79, 135, 255, 0.28)' },
+              { offset: 1, color: 'rgba(79, 135, 255, 0.03)' }
+            ])
+          }
+        }
+      ]
+    })
+  }
+
+  if (globalRiskMapRef.value) {
+    globalRiskMapChart?.dispose()
+    globalRiskMapChart = echarts.init(globalRiskMapRef.value)
+    globalRiskMapChart.setOption({
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          if (Array.isArray(params.value)) {
+            return `${params.name}<br/>经纬度: ${params.value[0].toFixed(4)}, ${params.value[1].toFixed(4)}<br/>风险权重: ${params.value[2]}`
+          }
+          return params.name
+        }
+      },
+      geo: {
+        map: 'world',
+        roam: true,
+        zoom: 1.14,
+        aspectScale: 0.82,
+        layoutCenter: ['50%', '54%'],
+        layoutSize: '110%',
+        itemStyle: {
+          areaColor: '#e9f2ff',
+          borderColor: '#8db1d9'
+        },
+        emphasis: {
+          itemStyle: {
+            areaColor: '#d1e6ff'
+          }
+        }
+      },
+      series: [
+        {
+          name: '风险来源',
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          symbolSize: (val: number[]) => Math.max(10, val[2] * 5),
+          itemStyle: {
+            color: '#ff5e7f'
+          },
+          label: {
+            show: true,
+            position: 'top',
+            formatter: '{b}',
+            color: '#2c3e50',
+            fontSize: 11
+          },
+          data: globalRiskPoints.value
+        },
+        {
+          name: '高危脉冲',
+          type: 'effectScatter',
+          coordinateSystem: 'geo',
+          rippleEffect: {
+            scale: 3,
+            brushType: 'stroke'
+          },
+          symbolSize: (val: number[]) => Math.max(12, val[2] * 6),
+          itemStyle: {
+            color: '#ff3b30'
+          },
+          data: globalRiskPoints.value.filter((p) => p.value[2] >= 3)
+        }
+      ]
+    })
+  }
+}
+
+const handleResize = () => {
+  riskLevelPieChart?.resize()
+  interceptTrendChart?.resize()
+  globalRiskMapChart?.resize()
+}
+
 const getRecordList = async () => {
   recordLoading.value = true
   try {
     const data = await getPayRiskAssessRecordPage(recordQuery)
     const page = unwrapRecordPage(data)
+
     if (page.total > 0 && page.list.length === 0 && recordQuery.pageNo > 1) {
       recordQuery.pageNo = 1
       const firstPageData = await getPayRiskAssessRecordPage(recordQuery)
       const firstPage = unwrapRecordPage(firstPageData)
       recordList.value = firstPage.list
       recordTotal.value = firstPage.total
-      return
+    } else {
+      recordList.value = page.list
+      recordTotal.value = page.total
     }
-    recordList.value = page.list
-    recordTotal.value = page.total
+
+    if (!selectedRecord.value && recordList.value.length > 0) {
+      selectedRecord.value = recordList.value[0]
+    }
+
+    await nextTick()
+    renderDashboardCharts()
   } catch (error: any) {
     recordList.value = []
     recordTotal.value = 0
@@ -296,42 +526,10 @@ const refreshRecordList = async () => {
   await getRecordList()
 }
 
-const handleClearRecords = async () => {
-  try {
-    await message.delConfirm('确认一键清空全部风险评估记录？该操作不可恢复。')
-  } catch {
-    return
-  }
-  clearing.value = true
-  try {
-    await clearPayRiskAssessRecords()
-    result.value = null
-    await refreshRecordList()
-    message.success('已一键清空')
-  } catch (error: any) {
-    message.error(error?.message || '一键清空失败')
-  } finally {
-    clearing.value = false
-  }
-}
-
 const handleUseRecord = (record: PayRiskAssessRecordVO) => {
-  form.ip = record.ip || ''
-  form.paymentDataJson = JSON.stringify(parseJsonText(record.paymentDataJson, {}), null, 2)
-  result.value = {
-    riskScore: record.riskScore,
-    riskLevel: record.riskLevel,
-    deepAnalysis: record.deepAnalysis || '',
-    riskFactors: parseJsonText(record.riskFactorsJson, []),
-    ipInfo: parseJsonText(record.ipInfoJson, {}),
-    whoisInfo: record.whoisInfoJson || undefined,
-    behaviorInfo: parseJsonText(record.behaviorInfoJson, undefined),
-    topologyInfo: parseJsonText(record.topologyInfoJson, undefined),
-    llmReport: parseJsonText(record.llmReportJson, undefined),
-    advancedAnalysis: parseJsonText(record.advancedAnalysisJson, undefined)
-  }
+  selectedRecord.value = record
+  message.success(`已加载记录 #${record.id}`)
 }
-
 
 const handleDeleteRecord = async (record: PayRiskAssessRecordVO) => {
   try {
@@ -339,39 +537,36 @@ const handleDeleteRecord = async (record: PayRiskAssessRecordVO) => {
   } catch {
     return
   }
+
   try {
     await deletePayRiskAssessRecord(record.id)
-    recordList.value = recordList.value.filter((item) => item.id !== record.id)
-    recordTotal.value = Math.max(0, recordTotal.value - 1)
+    if (selectedRecord.value?.id === record.id) {
+      selectedRecord.value = null
+    }
     await refreshRecordList()
     message.success('记录已删除')
   } catch (error: any) {
     message.error(error?.message || '删除记录失败')
   }
 }
-const handleAssess = async () => {
-  let paymentData: Record<string, unknown>
+
+const handleClearRecords = async () => {
   try {
-    paymentData = JSON.parse(form.paymentDataJson || '{}')
+    await message.delConfirm('确认一键清空全部风险评估记录？该操作不可恢复。')
   } catch {
-    message.error('待分析数据 JSON 格式不正确')
     return
   }
 
-  const req: PayRiskAssessReqVO = {
-    ip: form.ip ? form.ip.trim() : undefined,
-    paymentData
-  }
-
-  submitting.value = true
+  clearing.value = true
   try {
-    result.value = await assessPayRisk(req)
+    await clearPayRiskAssessRecords()
+    selectedRecord.value = null
     await refreshRecordList()
-    message.success('风控分析完成')
+    message.success('已一键清空')
   } catch (error: any) {
-    message.error(error?.message || '风控分析失败')
+    message.error(error?.message || '一键清空失败')
   } finally {
-    submitting.value = false
+    clearing.value = false
   }
 }
 
@@ -389,149 +584,250 @@ const riskTagType = (riskLevel?: string) => {
   }
 }
 
+watch(recordList, async () => {
+  await nextTick()
+  renderDashboardCharts()
+})
+
 onMounted(async () => {
   await refreshRecordList()
+  window.addEventListener('resize', handleResize)
 })
 
 onActivated(async () => {
   await refreshRecordList()
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  riskLevelPieChart?.dispose()
+  interceptTrendChart?.dispose()
+  globalRiskMapChart?.dispose()
+  riskLevelPieChart = null
+  interceptTrendChart = null
+  globalRiskMapChart = null
+})
 </script>
 
 <style lang="scss" scoped>
 .risk-assess-page {
-  --risk-bg: linear-gradient(160deg, #f1f5ff 0%, #eefaf6 45%, #f9f5ec 100%);
-  --risk-card: #ffffff;
-  --risk-text: #12202f;
-  --risk-muted: #587083;
-  --risk-border: #d8e4ef;
-  padding: 8px;
+  min-height: 100%;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background: var(--risk-bg);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(97, 167, 255, 0.2), transparent 30%),
+    radial-gradient(circle at 100% 0%, rgba(77, 223, 215, 0.16), transparent 28%),
+    linear-gradient(160deg, #f1f6ff 0%, #f6f9ff 48%, #fbfdff 100%);
   border-radius: 16px;
-  font-family:
-    'PingFang SC',
-    'Microsoft YaHei',
-    'Noto Sans SC',
-    'Hiragino Sans GB',
-    sans-serif;
 }
 
 .hero {
-  border-radius: 16px;
-  padding: 20px 22px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  border-radius: 18px;
+  padding: 22px;
+  border: 1px solid rgba(136, 187, 246, 0.45);
   background:
-    radial-gradient(circle at 16% 0%, rgba(42, 181, 125, 0.22), transparent 40%),
-    linear-gradient(135deg, #0f2337 0%, #17324b 48%, #0e2234 100%);
-  color: #ecf3ff;
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.hero-copy h1 {
-  margin: 6px 0;
-  font-size: 30px;
-  line-height: 1.1;
+    radial-gradient(circle at 90% 0%, rgba(96, 193, 255, 0.28), transparent 42%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(238, 248, 255, 0.86));
+  box-shadow: 0 14px 34px rgba(56, 113, 185, 0.14);
 }
 
 .hero-kicker {
   margin: 0;
-  color: #9bc0dc;
-  font-weight: 700;
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 700;
+  color: #4f7faf;
+  letter-spacing: 0.12em;
+}
+
+.hero-left h1 {
+  margin: 6px 0 10px;
+  color: #1a3d64;
+  font-size: 32px;
+  line-height: 1.2;
 }
 
 .hero-desc {
   margin: 0;
-  color: #c5d9ea;
-  font-size: 14px;
+  color: #5f7f9f;
+  max-width: 680px;
 }
 
-.hero-stats {
+.hero-actions {
+  margin-top: 16px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 200px;
-}
-
-.stat-chip {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-
-.stat-chip span {
-  display: block;
-  color: #b8cee1;
-  font-size: 12px;
-}
-
-.stat-chip strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 18px;
-  color: #fff;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
-  gap: 14px;
-}
-
-.right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.panel {
-  border-radius: 14px;
-  border: 1px solid var(--risk-border);
-  box-shadow: 0 12px 36px rgba(36, 58, 88, 0.08);
-  background: var(--risk-card);
-}
-
-.action-row {
-  display: flex;
-  flex-wrap: wrap;
   gap: 10px;
 }
 
-.metric-grid {
+
+.overview-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
-.metric-card {
-  padding: 14px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #f3f9ff 100%);
-  border: 1px solid #d8e7f3;
+.panel {
+  border-radius: 14px;
+  border: 1px solid rgba(140, 183, 232, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 251, 255, 0.86)),
+    radial-gradient(circle at 100% 0%, rgba(120, 185, 255, 0.12), transparent 42%);
+  box-shadow:
+    0 10px 26px rgba(73, 131, 197, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  padding: 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.panel:hover {
+  transform: translateY(-2px);
+  border-color: rgba(108, 168, 238, 0.62);
+  box-shadow:
+    0 14px 30px rgba(70, 129, 198, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.panel :deep(.el-card__body) {
+  padding: 0 !important;
 }
 
 .metric-card span {
-  color: var(--risk-muted);
   font-size: 12px;
+  color: #6283a7;
 }
 
 .metric-card strong {
   display: block;
-  font-size: 28px;
-  margin: 6px 0 10px;
-  color: var(--risk-text);
+  margin: 8px 0 12px;
+  font-size: 30px;
+  color: #1f446a;
+  line-height: 1;
 }
 
 .metric-card strong small {
   font-size: 14px;
-  color: #6f8599;
+  color: #6d8bae;
+}
+
+.risk-level-tag {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  padding: 0 14px !important;
+  height: 36px !important;
+  line-height: 34px !important;
+  letter-spacing: 0.04em;
+  border-radius: 10px;
+  border: 1px solid #2fbe85 !important;
+  color: #167a58 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.metric-card :deep(.risk-level-tag.el-tag),
+.metric-card :deep(.risk-level-tag.el-tag--large) {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  height: 36px !important;
+  line-height: 34px !important;
+  padding: 0 14px !important;
+  border: 1px solid #2fbe85 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.metric-card :deep(.risk-level-tag .el-tag__content) {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  line-height: 34px !important;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.chart-card {
+  padding: 14px 14px 10px;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 300px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(248, 252, 255, 0.76), rgba(239, 247, 255, 0.6));
+}
+
+.geo-panel {
+  grid-column: auto;
+}
+
+.trend-panel {
+  grid-column: 1 / -1;
+}
+
+.geo-canvas {
+  height: 300px;
+}
+
+.trend-panel .chart-canvas {
+  height: 380px;
+}
+
+.detail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.panel-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #24486f;
+  letter-spacing: 0.01em;
+}
+
+.panel-head p {
+  margin: 4px 0 0;
+  color: #6f8cab;
+  font-size: 12px;
+}
+
+.geo-panel .panel-head h3,
+.trend-panel .panel-head h3 {
+  position: relative;
+  padding-left: 10px;
+}
+
+.geo-panel .panel-head h3::before,
+.trend-panel .panel-head h3::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #4f87ff, #70b2ff);
+}
+
+.table-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .json-grid {
@@ -540,76 +836,83 @@ onActivated(async () => {
   gap: 12px;
 }
 
-.json-card h3 {
+.json-card h4 {
   margin: 0 0 8px;
   font-size: 14px;
-  color: #345066;
+  color: #375d86;
 }
 
 .json-block {
   margin: 0;
-  min-height: 220px;
-  max-height: 360px;
+  min-height: 200px;
+  max-height: 350px;
   overflow: auto;
   padding: 12px;
   border-radius: 10px;
-  background: #0f172a;
-  color: #dbeafe;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.65;
+  color: #1f446b;
+  border: 1px solid rgba(140, 183, 232, 0.42);
+  background: linear-gradient(180deg, #f7fbff 0%, #edf5ff 100%);
   white-space: pre-wrap;
 }
 
 .table-panel :deep(.el-table) {
   border-radius: 10px;
   overflow: hidden;
+  border: 1px solid rgba(128, 171, 224, 0.34);
+  --el-table-bg-color: rgba(248, 252, 255, 0.92);
+  --el-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
 }
 
-.table-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.table-title {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.table-header h3 {
-  margin: 0;
-  font-size: 16px;
-  color: var(--risk-text);
-}
-
-.table-header span {
-  font-size: 12px;
-  color: #7390a6;
+.table-panel :deep(.el-table th.el-table__cell) {
+  background: linear-gradient(180deg, rgba(236, 246, 255, 0.95), rgba(225, 239, 255, 0.95));
+  color: #31567e;
+  font-weight: 700;
 }
 
 @media (max-width: 1200px) {
-  .workspace {
+  .hero {
     grid-template-columns: 1fr;
   }
 
-  .metric-grid {
+  .overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .geo-panel,
+  .trend-panel {
+    grid-column: auto;
+  }
+
+  .chart-canvas {
+    height: 280px;
+  }
+
+  .geo-canvas {
+    height: 320px;
   }
 
   .json-grid {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 768px) {
-  .hero {
+  .table-head {
     flex-direction: column;
+    align-items: flex-start;
   }
 
-  .hero-copy h1 {
-    font-size: 24px;
+  .table-actions {
+    width: 100%;
+
+    :deep(.el-button) {
+      flex: 1;
+    }
   }
 }
 </style>

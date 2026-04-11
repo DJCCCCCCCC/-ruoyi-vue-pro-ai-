@@ -17,6 +17,9 @@ importers:
       '@form-create/element-ui':
         specifier: ^3.2.11
         version: 3.2.14(vue@3.5.12(typescript@5.3.3))
+      '@highcharts/map-collection':
+        specifier: ^2.3.2
+        version: 2.3.2
       '@iconify/iconify':
         specifier: ^3.1.1
         version: 3.1.1
@@ -74,6 +77,9 @@ importers:
       echarts:
         specifier: ^5.5.0
         version: 5.5.1
+      echarts-countries-js:
+        specifier: ^1.0.5
+        version: 1.0.5
       echarts-wordcloud:
         specifier: ^2.1.0
         version: 2.1.0(echarts@5.5.1)
@@ -83,6 +89,9 @@ importers:
       fast-xml-parser:
         specifier: ^4.3.2
         version: 4.5.0
+      geojson-world-map:
+        specifier: ^0.0.2
+        version: 0.0.2
       highlight.js:
         specifier: ^11.9.0
         version: 11.10.0
@@ -173,6 +182,9 @@ importers:
       web-storage-cache:
         specifier: ^1.1.1
         version: 1.1.1
+      world-geojson:
+        specifier: ^3.4.0
+        version: 3.4.0
       xml-js:
         specifier: ^1.6.11
         version: 1.6.11
@@ -1243,6 +1255,9 @@ packages:
 
   '@gera2ld/jsx-dom@2.2.2':
     resolution: {integrity: sha512-EOqf31IATRE6zS1W1EoWmXZhGfLAoO9FIlwTtHduSrBdud4npYBxYAkv8dZ5hudDPwJeeSjn40kbCL4wAzr8dA==}
+
+  '@highcharts/map-collection@2.3.2':
+    resolution: {integrity: sha512-qaOSSubX6mogXpGuwgM9yBjC+srNCxWPGCqewOL3HAdk1XrRqClSxVF30jn8mV5XR1bGxsMQYcibZeCyrYiEeA==}
 
   '@humanwhocodes/config-array@0.13.0':
     resolution: {integrity: sha512-DZLEEqFWQFiyK6h5YIeynKx7JlvCYWL0cImfSRXZ9l4Sg2efkFGTuFf6vzXjK1cq6IYkU+Eg/JizXw+TD2vRNw==}
@@ -3035,6 +3050,9 @@ packages:
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
+  echarts-countries-js@1.0.5:
+    resolution: {integrity: sha512-D7XlEpQYO2W7UAHVPUYftB+xudyuBAtTBUgXyJ8T+8kAI33EdneMbNnm5g38y13HtREkDCeDF4ZMIFxEAGHwaw==}
+
   echarts-wordcloud@2.1.0:
     resolution: {integrity: sha512-Kt1JmbcROgb+3IMI48KZECK2AP5lG6bSsOEs+AsuwaWJxQom31RTNd6NFYI01E/YaI1PFZeueaupjlmzSQasjQ==}
     peerDependencies:
@@ -3358,6 +3376,9 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
+
+  geojson-world-map@0.0.2:
+    resolution: {integrity: sha512-1ijzV+XTlphzaah6MJtHrhkAAshbd9Qwlt9pWGO8cE3cvL5pDbRHp8GMruqBaDERChnpk0mG3PMIN4m5La5MoQ==}
 
   get-caller-file@2.0.5:
     resolution: {integrity: sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==}
@@ -5092,6 +5113,9 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
+  world-geojson@3.4.0:
+    resolution: {integrity: sha512-Nd+ciBnmSpvZEkPee4fPRtDWsM5mFDJMk87IamfTCsewcovLCp6IzdmgJvYJ2cDTKh5MEvhozgFxpWB/HKAuVA==}
+
   wrap-ansi@6.2.0:
     resolution: {integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==}
     engines: {node: '>=8'}
@@ -6275,6 +6299,8 @@ snapshots:
   '@gera2ld/jsx-dom@2.2.2':
     dependencies:
       '@babel/runtime': 7.26.0
+
+  '@highcharts/map-collection@2.3.2': {}
 
   '@humanwhocodes/config-array@0.13.0':
     dependencies:
@@ -8333,6 +8359,8 @@ snapshots:
 
   eastasianwidth@0.2.0: {}
 
+  echarts-countries-js@1.0.5: {}
+
   echarts-wordcloud@2.1.0(echarts@5.5.1):
     dependencies:
       echarts: 5.5.1
@@ -8743,6 +8771,8 @@ snapshots:
   function-bind@1.1.2: {}
 
   gensync@1.0.0-beta.2: {}
+
+  geojson-world-map@0.0.2: {}
 
   get-caller-file@2.0.5: {}
 
@@ -10480,6 +10510,8 @@ snapshots:
   wildcard@1.1.2: {}
 
   word-wrap@1.2.5: {}
+
+  world-geojson@3.4.0: {}
 
   wrap-ansi@6.2.0:
     dependencies:
