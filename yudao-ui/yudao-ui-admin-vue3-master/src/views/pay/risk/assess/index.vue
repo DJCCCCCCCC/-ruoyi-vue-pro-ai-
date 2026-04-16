@@ -232,6 +232,75 @@ const selectedResultJson = computed(() => JSON.stringify(selectedResult.value, n
 const riskScore = computed(() => Math.min(Math.max(Number(selectedResult.value?.riskScore || 0), 0), 100))
 const riskFactorsCount = computed(() => selectedResult.value?.riskFactors?.length || 0)
 
+const ipGeoCache = new Map<string, { lng: number; lat: number; name?: string; countryCode?: string }>()
+const ipGeoPending = new Map<string, Promise<{ lng: number; lat: number; name?: string; countryCode?: string } | null>>()
+
+const normalizeIp = (ip?: string) => (ip || '').trim()
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const countryCenterMap: Record<string, [number, number]> = {
+  CN: [104.1954, 35.8617],
+  US: [-98.5795, 39.8283],
+  SG: [103.8198, 1.3521],
+  JP: [138.2529, 36.2048],
+  GB: [-3.436, 55.3781],
+  DE: [10.4515, 51.1657],
+  FR: [2.2137, 46.2276],
+  IN: [78.9629, 20.5937],
+  RU: [105.3188, 61.524],
+  BR: [-51.9253, -14.235],
+  AU: [133.7751, -25.2744],
+  CA: [-106.3468, 56.1304],
+  KR: [127.7669, 35.9078],
+  HK: [114.1694, 22.3193],
+  TW: [121.5654, 25.033],
+  ID: [113.9213, -0.7893],
+  VN: [108.2772, 14.0583],
+  TH: [100.9925, 15.87],
+  MY: [101.9758, 4.2105],
+  PH: [121.774, 12.8797],
+  AE: [53.8478, 23.4241],
+  SA: [45.0792, 23.8859],
+  ZA: [22.9375, -30.5595],
+  NG: [8.6753, 9.082]
+}
+
+const resolveIpGeo = async (ip: string) => {
+  const key = normalizeIp(ip)
+  if (!key) return null
+  if (ipGeoCache.has(key)) return ipGeoCache.get(key) || null
+  if (ipGeoPending.has(key)) return ipGeoPending.get(key) || null
+
+  const pending = (async () => {
+    try {
+      await sleep(120)
+      const resp = await fetch(`https://ipwho.is/${encodeURIComponent(key)}`)
+      if (!resp.ok) return null
+      const data = await resp.json()
+      if (!data?.success) return null
+
+      const lng = Number(data.longitude)
+      const lat = Number(data.latitude)
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+
+      const result = {
+        lng,
+        lat,
+        name: data.city || data.region || data.country,
+        countryCode: String(data.country_code || '').toUpperCase()
+      }
+      ipGeoCache.set(key, result)
+      return result
+    } catch {
+      return null
+    } finally {
+      ipGeoPending.delete(key)
+    }
+  })()
+
+  ipGeoPending.set(key, pending)
+  return pending
+}
+
 const getHourLabel = (date: Date) => `${String(date.getHours()).padStart(2, '0')}:00`
 
 const riskLevelDistribution = computed(() => {
@@ -274,45 +343,13 @@ const interceptTrendData = computed(() => {
 })
 
 const globalRiskPoints = computed(() => {
-  const fallbackPoints = [
-    { name: '北京', value: [116.4074, 39.9042, 9] },
-    { name: '新加坡', value: [103.8198, 1.3521, 7] },
-    { name: '伦敦', value: [-0.1276, 51.5072, 6] },
-    { name: '纽约', value: [-74.006, 40.7128, 8] },
-    { name: '东京', value: [139.6917, 35.6895, 5] }
-  ]
+  const pointsMap = new Map<string, { name: string; value: [number, number, number] }>()
 
-  const countryCenterMap: Record<string, [number, number]> = {
-    CN: [104.1954, 35.8617],
-    US: [-98.5795, 39.8283],
-    SG: [103.8198, 1.3521],
-    JP: [138.2529, 36.2048],
-    GB: [-3.436, 55.3781],
-    DE: [10.4515, 51.1657],
-    FR: [2.2137, 46.2276],
-    IN: [78.9629, 20.5937],
-    RU: [105.3188, 61.524],
-    BR: [-51.9253, -14.235],
-    AU: [133.7751, -25.2744],
-    CA: [-106.3468, 56.1304],
-    KR: [127.7669, 35.9078],
-    HK: [114.1694, 22.3193],
-    TW: [121.5654, 25.033],
-    ID: [113.9213, -0.7893],
-    VN: [108.2772, 14.0583],
-    TH: [100.9925, 15.87],
-    MY: [101.9758, 4.2105],
-    PH: [121.774, 12.8797],
-    AE: [53.8478, 23.4241],
-    SA: [45.0792, 23.8859],
-    ZA: [22.9375, -30.5595],
-    NG: [8.6753, 9.082]
-  }
-
-  const points: Array<{ name: string; value: [number, number, number] }> = []
   recordList.value.forEach((item) => {
-    const ipInfo = parseJsonText(item.ipInfoJson, {})
+    const ip = normalizeIp(item.ip)
+    if (!ip) return
 
+    const ipInfo = parseJsonText(item.ipInfoJson, {})
     const lng = Number(
       ipInfo?.lng ??
         ipInfo?.lon ??
@@ -330,13 +367,11 @@ const globalRiskPoints = computed(() => {
 
     const countryCode = String(ipInfo?.countryCode || ipInfo?.country_code || '').toUpperCase()
     const countryName = String(ipInfo?.country || '').toUpperCase()
-    const countryCenter =
-      countryCenterMap[countryCode] ||
-      countryCenterMap[countryName] ||
-      countryCenterMap[item.ip?.slice(0, 2)?.toUpperCase() || '']
+    const countryCenter = countryCenterMap[countryCode] || countryCenterMap[countryName]
+    const geo = ipGeoCache.get(ip)
 
-    const finalLng = Number.isFinite(lng) ? lng : countryCenter?.[0]
-    const finalLat = Number.isFinite(lat) ? lat : countryCenter?.[1]
+    const finalLng = Number.isFinite(lng) ? lng : geo?.lng ?? countryCenter?.[0]
+    const finalLat = Number.isFinite(lat) ? lat : geo?.lat ?? countryCenter?.[1]
     if (!Number.isFinite(finalLng) || !Number.isFinite(finalLat)) return
 
     const level = (item.riskLevel || '').toUpperCase()
@@ -345,14 +380,21 @@ const globalRiskPoints = computed(() => {
       ipInfo?.city ||
       ipInfo?.regionName ||
       ipInfo?.country ||
+      geo?.name ||
       countryCode ||
-      item.ip ||
+      ip ||
       '未知来源'
 
-    points.push({ name: placeName, value: [finalLng, finalLat, weight] })
+    const key = `${finalLng.toFixed(4)}_${finalLat.toFixed(4)}_${placeName}`
+    const existing = pointsMap.get(key)
+    if (existing) {
+      existing.value[2] += weight
+    } else {
+      pointsMap.set(key, { name: placeName, value: [finalLng, finalLat, weight] })
+    }
   })
 
-  return points.length > 0 ? points : fallbackPoints
+  return [...pointsMap.values()]
 })
 
 const renderDashboardCharts = () => {
@@ -451,7 +493,7 @@ const renderDashboardCharts = () => {
           name: '风险来源',
           type: 'scatter',
           coordinateSystem: 'geo',
-          symbolSize: (val: number[]) => Math.max(10, val[2] * 5),
+          symbolSize: (val: number[]) => Math.max(10, Math.min(22, val[2] * 3 + 8)),
           itemStyle: {
             color: '#ff5e7f'
           },
@@ -472,7 +514,7 @@ const renderDashboardCharts = () => {
             scale: 3,
             brushType: 'stroke'
           },
-          symbolSize: (val: number[]) => Math.max(12, val[2] * 6),
+          symbolSize: (val: number[]) => Math.max(12, Math.min(26, val[2] * 4 + 10)),
           itemStyle: {
             color: '#ff3b30'
           },
@@ -487,6 +529,16 @@ const handleResize = () => {
   riskLevelPieChart?.resize()
   interceptTrendChart?.resize()
   globalRiskMapChart?.resize()
+}
+
+const enrichRecordIpGeo = async () => {
+  const ips = Array.from(new Set(recordList.value.map((item) => normalizeIp(item.ip)).filter(Boolean)))
+  const tasks = ips.map(async (ip) => {
+    if (ipGeoCache.has(ip) || ipGeoPending.has(ip)) return
+    const geo = await resolveIpGeo(ip)
+    if (geo) ipGeoCache.set(ip, geo)
+  })
+  await Promise.allSettled(tasks)
 }
 
 const getRecordList = async () => {
@@ -510,6 +562,7 @@ const getRecordList = async () => {
       selectedRecord.value = recordList.value[0]
     }
 
+    await enrichRecordIpGeo()
     await nextTick()
     renderDashboardCharts()
   } catch (error: any) {

@@ -722,6 +722,10 @@ onBeforeUnmount(() => {
   border: 1px solid #d8e4ef;
 }
 
+.chart-shell:hover {
+  box-shadow: 0 18px 42px rgba(56, 113, 185, 0.12);
+}
+
 .panel-head,
 .signal-head {
   display: flex;
@@ -843,7 +847,7 @@ onBeforeUnmount(() => {
 }
 
 .content-grid {
-  grid-template-columns: minmax(0, 1.4fr) 320px;
+  grid-template-columns: minmax(0, 1.6fr) 320px;
 }
 
 .summary-card,
@@ -876,7 +880,10 @@ onBeforeUnmount(() => {
 }
 
 .chart-shell {
+  min-height: 720px;
   padding: 14px;
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(circle at center, rgba(59, 130, 246, 0.08), transparent 52%),
     linear-gradient(180deg, #f9fbff 0%, #eef5fb 100%);
@@ -891,7 +898,8 @@ onBeforeUnmount(() => {
 }
 
 .chart-host {
-  height: 580px;
+  flex: 1;
+  min-height: 640px;
 }
 
 .side-panel,
