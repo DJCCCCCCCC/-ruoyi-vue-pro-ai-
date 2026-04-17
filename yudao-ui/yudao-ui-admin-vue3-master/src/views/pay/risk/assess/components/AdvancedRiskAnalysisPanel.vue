@@ -62,6 +62,37 @@
       </article>
 
       <article class="module-card">
+        <h4>历史案例相似性</h4>
+        <div class="case-summary">
+          <div>
+            <span class="block-title">案例加分（上限20分）</span>
+            <strong>+{{ totalCaseBonus }}</strong>
+          </div>
+          <div>
+            <span class="block-title">命中案例数</span>
+            <strong>{{ analysis.caseMatches?.length || 0 }}</strong>
+          </div>
+        </div>
+        <div v-if="analysis.caseMatches?.length" class="card-list">
+          <div v-for="item in analysis.caseMatches" :key="item.recordId" class="mini-card case-card">
+            <div class="case-head">
+              <strong>记录 #{{ item.recordId }}</strong>
+              <el-tag size="small" type="danger">{{ Math.round((item.similarity || 0) * 100) }}%</el-tag>
+            </div>
+            <p>{{ item.summary }}</p>
+            <div class="case-meta">
+              <span>加分 {{ item.bonusScore || 0 }} 分</span>
+              <span>{{ item.riskLevel || '-' }}</span>
+              <span>分数 {{ item.riskScore ?? '-' }}</span>
+            </div>
+            <el-progress :percentage="Math.round((item.similarity || 0) * 100)" :stroke-width="8" :show-text="false" />
+            <small>命中原因：{{ item.matchedReasons }}</small>
+          </div>
+        </div>
+        <p v-else class="empty-text">暂无命中历史案例</p>
+      </article>
+
+      <article class="module-card">
         <h4>干预策略生成</h4>
         <div v-if="analysis.interventions?.length" class="card-list">
           <div v-for="item in analysis.interventions" :key="`${item.priority}-${item.title}`" class="mini-card intervention-card">
@@ -80,13 +111,19 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { PayRiskAdvancedAnalysis } from '@/api/pay/risk/assess'
 
 interface Props {
   analysis?: PayRiskAdvancedAnalysis
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+
+const totalCaseBonus = computed(() => {
+  const total = props.analysis?.caseMatches?.reduce((sum, item) => sum + (item.bonusScore || 0), 0) || 0
+  return Math.min(20, total)
+})
 </script>
 
 <style scoped>
@@ -192,6 +229,44 @@ defineProps<Props>()
   display: grid;
   gap: 14px;
   margin-top: 12px;
+}
+
+.case-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.8);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.case-summary strong {
+  display: block;
+  margin-top: 6px;
+  color: #12202f;
+  font-size: 22px;
+}
+
+.case-card {
+  position: relative;
+}
+
+.case-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.case-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 10px;
+  color: #5d7488;
+  font-size: 12px;
 }
 
 .chip-list {

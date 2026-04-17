@@ -55,6 +55,17 @@ export interface PayRiskAdvancedAnalysis {
     watchList?: string[]
     campaignHints?: string[]
   }
+  caseMatches?: Array<{
+    recordId?: number
+    scene?: string
+    source?: string
+    riskLevel?: string
+    riskScore?: number
+    similarity?: number
+    bonusScore?: number
+    matchedReasons?: string
+    summary?: string
+  }>
   interventions?: Array<{
     priority?: string
     type?: string

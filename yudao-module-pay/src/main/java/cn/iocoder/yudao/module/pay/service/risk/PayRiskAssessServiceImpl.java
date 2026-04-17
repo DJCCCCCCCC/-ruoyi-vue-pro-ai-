@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAdvancedAnalysisBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
@@ -104,11 +105,20 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 whoisRiskAssessment.getNotes(),
                 "Whois 情报");
 
+        PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult =
+                PayRiskCaseSimilarityAnalyzer.analyze(paymentData, ipInfoMaskedJsonNode, null, payRiskAssessRecordMapper);
+        mergedResp = mergeExternalRisk(mergedResp,
+                caseSimilarityResult.getBonusScore(),
+                caseSimilarityResult.getRiskFactors(),
+                caseSimilarityResult.getNotes(),
+                "历史案例相似性");
+
         AppPayRiskAssessRespVO respVO = new AppPayRiskAssessRespVO();
         respVO.setRiskScore(mergedResp.getRiskScore());
         respVO.setRiskLevel(mergedResp.getRiskLevel());
         respVO.setDeepAnalysis(mergedResp.getDeepAnalysis());
         respVO.setRiskFactors(mergedResp.getRiskFactors());
+        respVO.setCaseSimilarityBonus(caseSimilarityResult.getBonusScore());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
         respVO.setBehaviorInfo(buildBehaviorInfo(behaviorAssessBundle));
         respVO.setTopologyInfo(topologyRiskAssessment.getTopology());
@@ -141,6 +151,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
         respVO.setLlmReport(buildLlmAnalysisReport(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode));
         respVO.setAdvancedAnalysis(buildAdvancedAnalysis(paymentData, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
+        if (respVO.getAdvancedAnalysis() != null) {
+            respVO.getAdvancedAnalysis().setCaseMatches(caseSimilarityResult.getMatches());
+        }
 
         saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
         return respVO;
@@ -161,6 +174,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("topologyInfo", respVO.getTopologyInfo());
         result.put("llmReport", respVO.getLlmReport());
         result.put("advancedAnalysis", respVO.getAdvancedAnalysis());
+        result.put("caseSimilarityBonus", respVO.getCaseSimilarityBonus());
+        result.put("caseSimilarityMatches", respVO.getAdvancedAnalysis() == null ? null : respVO.getAdvancedAnalysis().getCaseMatches());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 

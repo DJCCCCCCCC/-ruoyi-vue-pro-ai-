@@ -49,4 +49,7 @@ public class AppPayRiskAssessRespVO {
     @Schema(description = "Advanced risk analysis")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private PayRiskAdvancedAnalysis advancedAnalysis;
+
+    @Schema(description = "历史案例相似性加分", example = "12")
+    private Integer caseSimilarityBonus;
 }

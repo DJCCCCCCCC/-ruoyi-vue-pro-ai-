@@ -29,6 +29,11 @@
         <span>命中因子</span>
         <strong>{{ riskFactorsCount }}</strong>
       </ContentWrap>
+
+      <ContentWrap class="panel metric-card">
+        <span>历史案例加分</span>
+        <strong>+{{ caseSimilarityBonus }}</strong>
+      </ContentWrap>
     </section>
 
     <section class="dashboard-grid">
@@ -65,6 +70,10 @@
 
     <section v-if="selectedResult" class="detail-stack">
       <LlmRiskReportPanel :report="selectedResult?.llmReport" />
+      <ContentWrap v-if="selectedResult.caseSimilarityBonus" class="panel metric-inline">
+        <span>历史案例加分</span>
+        <strong>+{{ selectedResult.caseSimilarityBonus }}</strong>
+      </ContentWrap>
       <AdvancedRiskAnalysisPanel :analysis="selectedResult?.advancedAnalysis" />
 
       <ThreatIntelPanel
@@ -231,6 +240,12 @@ const selectedResultJson = computed(() => JSON.stringify(selectedResult.value, n
 
 const riskScore = computed(() => Math.min(Math.max(Number(selectedResult.value?.riskScore || 0), 0), 100))
 const riskFactorsCount = computed(() => selectedResult.value?.riskFactors?.length || 0)
+const caseSimilarityBonus = computed(() => {
+  const directBonus = Number((selectedResult.value as any)?.caseSimilarityBonus || 0)
+  if (directBonus > 0) return Math.min(20, directBonus)
+  const matches = selectedResult.value?.advancedAnalysis?.caseMatches || []
+  return Math.min(20, matches.reduce((sum, item) => sum + Number(item.bonusScore || 0), 0))
+})
 
 const ipGeoCache = new Map<string, { lng: number; lat: number; name?: string; countryCode?: string }>()
 const ipGeoPending = new Map<string, Promise<{ lng: number; lat: number; name?: string; countryCode?: string } | null>>()

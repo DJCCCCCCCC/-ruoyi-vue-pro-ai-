@@ -13,7 +13,22 @@ public class PayRiskAdvancedAnalysis {
 
     private RelationshipUniverse universe;
 
+    private List<CaseSimilarityMatch> caseMatches;
+
     private List<InterventionAction> interventions;
+
+    @Data
+    public static class CaseSimilarityMatch {
+        private Long recordId;
+        private String scene;
+        private String source;
+        private String riskLevel;
+        private Integer riskScore;
+        private Double similarity;
+        private Integer bonusScore;
+        private String matchedReasons;
+        private String summary;
+    }
 
     @Data
     public static class TimelineEvent {
