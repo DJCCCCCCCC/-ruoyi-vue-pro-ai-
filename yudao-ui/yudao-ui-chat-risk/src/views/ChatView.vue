@@ -26,12 +26,39 @@
         </div>
       </header>
 
+      <div class="user-profile-strip" aria-label="选填，用于生成更贴合你的防诈说明">
+        <span class="strip-hint">本人情况（选填）</span>
+        <select v-model="userAgeBand" class="strip-select" :disabled="chatStore.isLoading">
+          <option value="">年龄段 · 不限</option>
+          <option value="UNDER_18">未成年</option>
+          <option value="YOUNG_ADULT">青年</option>
+          <option value="MIDDLE_AGED">中年</option>
+          <option value="SENIOR">中老年</option>
+        </select>
+        <select v-model="userPersonality" class="strip-select" :disabled="chatStore.isLoading">
+          <option value="">个性倾向 · 不限</option>
+          <option value="ANXIOUS">偏焦虑 / 易紧张</option>
+          <option value="CAUTIOUS">偏谨慎</option>
+          <option value="DIGITAL_NOVICE">对手机网银不熟</option>
+          <option value="AUTHORITY_TRUSTING">较信「官方/警察」口吻</option>
+          <option value="IMPULSIVE">容易匆忙做决定</option>
+        </select>
+        <select v-model="userRiskLiteracy" class="strip-select" :disabled="chatStore.isLoading">
+          <option value="">防诈了解 · 不限</option>
+          <option value="LOW">较少了解</option>
+          <option value="MEDIUM">一般</option>
+          <option value="HIGH">较熟悉</option>
+        </select>
+      </div>
+
       <div ref="messagesRef" class="chat-messages">
         <div class="day-divider">今天</div>
 
         <section v-if="chatStore.messages.length === 0" class="welcome-card">
           <h3>这里不是和风控助手对话，而是模拟你和对方的正常聊天。</h3>
-          <p>对方可以发付款链接、退款通知、催促转账等内容；分析结果会提交到后台风控接口。</p>
+          <p>
+            对方可以发付款链接、退款通知、催促转账等内容；分析结果会提交到后台风控接口。上方「本人情况」为选填，填写后模型会用更贴合你年龄与性格的方式说明对方为何可疑、该怎么防。
+          </p>
           <div class="welcome-actions">
             <button
               v-for="preset in riskPresets"
@@ -94,7 +121,7 @@
             </button>
           </div>
 
-          <RiskResult :riskData="latestRiskResult" />
+          <RiskResultCompact :risk-data="latestRiskResult" />
 
           <div class="risk-dialog-actions">
             <button type="button" class="risk-dialog-btn risk-dialog-btn-secondary" @click="closeRiskDialog">
@@ -111,7 +138,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import ChatBubble from '@/components/ChatBubble.vue'
 import ChatInput from '@/components/ChatInput.vue'
-import RiskResult from '@/components/RiskResult.vue'
+import RiskResultCompact from '@/components/RiskResultCompact.vue'
 import { useRiskAssess } from '@/composables/useRiskAssess'
 import { riskPresets, type RiskPreset } from '@/constants/presets'
 import { useChatStore } from '@/stores/chat'
@@ -127,6 +154,11 @@ const sessionVersion = ref(0)
 const latestRiskResult = ref<PayRiskAssessRespVO | null>(null)
 const riskDialogVisible = ref(false)
 const activePreset = ref<RiskPreset | null>(null)
+
+/** 选填：传给后端 LLM，用于个性化防诈话术（年龄段 / 个性 / 防诈了解程度） */
+const userAgeBand = ref('')
+const userPersonality = ref('')
+const userRiskLiteracy = ref('')
 
 const HIGH_RISK_SCORE_THRESHOLD = 65
 const popupRiskLevels: RiskLevel[] = ['HIGH', 'CRITICAL']
@@ -190,12 +222,12 @@ const riskDialogTitle = computed(() => {
     return ''
   }
   if (result.riskLevel === 'CRITICAL') {
-    return '检测到严重风险，请立即中止当前操作'
+    return '严重风险'
   }
   if (isPopupRiskResult(result)) {
-    return '检测到高风险行为，请优先人工复核'
+    return '高风险预警'
   }
-  return '已完成本次风险分析，请查看评估结果'
+  return '分析结果'
 })
 
 const riskDialogSummary = computed(() => {
@@ -203,14 +235,22 @@ const riskDialogSummary = computed(() => {
   if (!result) {
     return ''
   }
-  const normalizedScore = Math.min(Math.max(Number(result.riskScore) || 0, 0), 100)
+  const n = Math.min(Math.max(Number(result.riskScore) || 0, 0), 100)
+  const levelZh =
+    result.riskLevel === 'CRITICAL'
+      ? '严重'
+      : result.riskLevel === 'HIGH'
+        ? '高'
+        : result.riskLevel === 'MEDIUM'
+          ? '中'
+          : '低'
   if (result.riskLevel === 'CRITICAL') {
-    return `当前风险分为 ${normalizedScore} 分，已达到严重风险等级，建议立即拦截并核验对方身份。`
+    return `风险分 ${n} · 等级 ${levelZh} · 请先不要转账，核实对方身份。`
   }
   if (isPopupRiskResult(result)) {
-    return `当前风险分为 ${normalizedScore} 分，已达到高风险阈值，建议暂停转账并追加身份验证。`
+    return `风险分 ${n} · 等级 ${levelZh} · 建议暂停付款并人工复核。`
   }
-  return `当前风险分为 ${normalizedScore} 分，未触发高风险弹窗阈值，你可以继续结合分析详情判断是否需要人工介入。`
+  return `风险分 ${n} · 等级 ${levelZh}`
 })
 
 const applyPreset = (preset: RiskPreset) => {
@@ -325,27 +365,43 @@ const buildAnalysisPayload = () => {
   const detectedAmount = extractAmountFromMessages(conversationMessages)
   const transactions = buildSimulatedTransactions(detectedAmount)
 
+  const paymentData: Record<string, unknown> = {
+    scene: 'WECHAT_CHAT_RISK',
+    source: 'chat-risk-test-page',
+    presetId: activePreset.value?.id,
+    presetTitle: activePreset.value?.title,
+    messageCount: conversationMessages.length,
+    linkCount: links.length,
+    links,
+    amount: detectedAmount,
+    detectedSignals,
+    latestPeerMessage: latestPeerMessage?.content || '',
+    transactions,
+    messages: conversationMessages.map((message) => ({
+      role: message.type,
+      senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),
+      content: message.content,
+      timestamp: message.timestamp.toISOString()
+    }))
+  }
+
+  const profile: Record<string, string> = {}
+  if (userAgeBand.value) {
+    profile.ageBand = userAgeBand.value
+  }
+  if (userPersonality.value) {
+    profile.personalityHint = userPersonality.value
+  }
+  if (userRiskLiteracy.value) {
+    profile.riskLiteracy = userRiskLiteracy.value
+  }
+  if (Object.keys(profile).length > 0) {
+    paymentData.userProfile = profile
+  }
+
   return {
     ip: detectedIp || '8.8.8.8',
-    paymentData: {
-      scene: 'WECHAT_CHAT_RISK',
-      source: 'chat-risk-test-page',
-      presetId: activePreset.value?.id,
-      presetTitle: activePreset.value?.title,
-      messageCount: conversationMessages.length,
-      linkCount: links.length,
-      links,
-      amount: detectedAmount,
-      detectedSignals,
-      latestPeerMessage: latestPeerMessage?.content || '',
-      transactions,
-      messages: conversationMessages.map((message) => ({
-        role: message.type,
-        senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),
-        content: message.content,
-        timestamp: message.timestamp.toISOString()
-      }))
-    }
+    paymentData
   }
 }
 
@@ -418,6 +474,9 @@ const handleClear = () => {
     lastSubmittedFingerprint.value = ''
     latestRiskResult.value = null
     riskDialogVisible.value = false
+    userAgeBand.value = ''
+    userPersonality.value = ''
+    userRiskLiteracy.value = ''
   }
 }
 
@@ -454,6 +513,35 @@ if (chatStore.messages.length === 0) {
   padding: 14px 16px;
   background: #f5f7fa;
   border-bottom: 1px solid #d7dde6;
+}
+
+.user-profile-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 14px 10px;
+  background: #fdf4ff;
+  border-bottom: 1px solid #e9d5ff;
+  font-size: 12px;
+}
+
+.strip-hint {
+  color: #6b21a8;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.strip-select {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid #d8b4fe;
+  background: #fff;
+  color: #4c1d95;
+  font-size: 12px;
 }
 
 .header-main {
@@ -591,8 +679,8 @@ if (chatStore.messages.length === 0) {
 }
 
 .risk-dialog {
-  width: min(100%, 920px);
-  max-height: min(100vh - 40px, 900px);
+  width: min(100%, 480px);
+  max-height: min(100vh - 40px, 640px);
   overflow-y: auto;
   padding: 24px;
   border-radius: 28px;
@@ -621,16 +709,16 @@ if (chatStore.messages.length === 0) {
 
 .risk-dialog-header h3 {
   margin: 0;
-  font-size: 24px;
-  line-height: 1.3;
+  font-size: 18px;
+  line-height: 1.35;
   color: #111827;
 }
 
 .risk-dialog-summary {
-  margin: 8px 0 0;
-  line-height: 1.7;
+  margin: 6px 0 0;
+  line-height: 1.5;
   color: #475569;
-  max-width: 720px;
+  font-size: 13px;
 }
 
 .risk-dialog-close {

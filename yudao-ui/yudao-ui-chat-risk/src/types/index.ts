@@ -70,6 +70,20 @@ export interface PayRiskRelationTopology {
   }>
 }
 
+export interface PayRiskLlmPersonaProfile {
+  summary?: string
+  claimedOrImpliedRole?: string
+  inferredArchetype?: string
+  communicationTraits?: string[]
+  pressureAndControlSignals?: string[]
+}
+
+export interface PayRiskLlmTailoredUserGuidance {
+  whyLikelyScamPlainLanguage?: string
+  preventionTipsForThisUser?: string[]
+  reassuranceLine?: string
+}
+
 export interface PayRiskLlmReport {
   mode?: string
   summary?: string
@@ -78,6 +92,8 @@ export interface PayRiskLlmReport {
   evidence?: string[]
   suspiciousEntities?: string[]
   recommendations?: string[]
+  personaProfile?: PayRiskLlmPersonaProfile
+  tailoredUserGuidance?: PayRiskLlmTailoredUserGuidance
 }
 
 export interface PayRiskAdvancedAnalysis {

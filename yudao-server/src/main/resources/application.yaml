@@ -264,6 +264,13 @@ yudao:
   web:
     admin-ui:
       url: http://dashboard.yudao.iocoder.cn # Admin 管理后台 UI 的地址
+  # 后端启动后是否自动打开浏览器（本地见 application-local.yaml）；urls 为英文逗号分隔的多个地址
+  devtools:
+    browser:
+      enabled: false
+      urls: http://127.0.0.1:80/,http://127.0.0.1:5173/ # 管理端 yudao-ui-admin-vue3-master、聊天风险 yudao-ui-chat-risk（按本机端口改）
+      delay-millis: 1200
+      stagger-millis: 500
   xss:
     enable: false
     exclude-urls: # 如下两个 url，仅仅是为了演示，去掉配置也没关系

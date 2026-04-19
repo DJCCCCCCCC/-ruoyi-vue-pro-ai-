@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 /**
  * 支付风险评估记录 DO
  */
@@ -74,4 +76,25 @@ public class PayRiskAssessRecordDO extends BaseDO {
     private String llmReportJson;
 
     private String advancedAnalysisJson;
+
+    /**
+     * 策略建议动作：ALLOW / MANUAL_REVIEW / BLOCK
+     */
+    private String decisionAction;
+
+    /**
+     * 策略决策 JSON（{@link cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult}）
+     */
+    private String decisionJson;
+
+    /**
+     * 人工复核状态
+     */
+    private String reviewStatus;
+
+    private String reviewRemark;
+
+    private String reviewer;
+
+    private LocalDateTime reviewTime;
 }

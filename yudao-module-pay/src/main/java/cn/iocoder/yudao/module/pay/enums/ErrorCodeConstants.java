@@ -101,5 +101,8 @@ public interface ErrorCodeConstants {
     ErrorCode PAY_RISK_ASSESS_IPINFO_CALL_FAILED = new ErrorCode(1_007_010_003, "ipinfo 调用失败：{}");
     ErrorCode PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED = new ErrorCode(1_007_010_004, "DeepSeek 调用失败：{}");
     ErrorCode PAY_RISK_ASSESS_AI_RESPONSE_INVALID = new ErrorCode(1_007_010_005, "AI 风险评估结果无法解析为有效 JSON");
+    ErrorCode PAY_RISK_ASSESS_RECORD_NOT_FOUND = new ErrorCode(1_007_010_006, "支付风险评估记录不存在");
+    ErrorCode PAY_RISK_ASSESS_REVIEW_STATUS_INVALID = new ErrorCode(1_007_010_007, "当前记录不在待复核状态，无法提交复核结果");
+    ErrorCode PAY_RISK_ASSESS_REVIEW_ACTION_INVALID = new ErrorCode(1_007_010_008, "复核动作不合法，应为 PASS / BLOCK / DISMISS");
 
 }

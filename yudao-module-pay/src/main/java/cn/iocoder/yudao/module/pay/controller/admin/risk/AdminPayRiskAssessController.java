@@ -6,6 +6,7 @@ import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
@@ -86,6 +87,14 @@ public class AdminPayRiskAssessController {
     @PermitAll
     public CommonResult<Boolean> clearRecordsByPost() {
         payRiskAssessService.clearRiskAssessRecords();
+        return success(true);
+    }
+
+    @PostMapping("/review")
+    @Operation(summary = "支付风险评估人工复核（决策闭环）")
+    @PermitAll
+    public CommonResult<Boolean> reviewRecord(@Valid @RequestBody PayRiskAssessReviewReqVO reqVO) {
+        payRiskAssessService.reviewRiskAssessRecord(reqVO);
         return success(true);
     }
 }

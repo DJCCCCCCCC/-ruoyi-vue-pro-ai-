@@ -38,6 +38,14 @@ public class DeepSeekClient {
     @Value("${yudao.pay.risk-assess.deepseek.max-tokens:800}")
     private Integer maxTokens;
 
+    /** 首次评分：略收紧输出长度，加快生成与后续二次调用的输入体积 */
+    @Value("${yudao.pay.risk-assess.deepseek.assess-max-tokens:512}")
+    private Integer assessMaxTokens;
+
+    /** 综合研判报告：结构化 JSON，单独配置便于调优速度 */
+    @Value("${yudao.pay.risk-assess.deepseek.report-max-tokens:768}")
+    private Integer reportMaxTokens;
+
     @Value("${yudao.pay.risk-assess.http-timeout-millis:20000}")
     private Integer timeoutMillis;
 
@@ -50,13 +58,14 @@ public class DeepSeekClient {
         String url = baseUrl + "/chat/completions";
 
         // DeepSeek 默认兼容 OpenAI：使用 Authorization: Bearer xxx
-        Map<String, Object> reqBody = buildRequestBody(userPrompt, true);
+        int cap = assessMaxTokens != null && assessMaxTokens > 0 ? assessMaxTokens : maxTokens;
+        Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskPromptBuilder.SYSTEM_PROMPT, true, cap);
         try {
             return doCall(url, reqBody, PayRiskAssessAiResponse.class);
         } catch (Exception firstEx) {
             // 有些账号/版本不支持 response_format，第二次不传该字段
             log.warn("[DeepSeekClient][assess] 第一次调用失败，重试(不含 response_format)：{}", firstEx.getMessage());
-            reqBody = buildRequestBody(userPrompt, false);
+            reqBody = buildRequestBody(userPrompt, PayRiskPromptBuilder.SYSTEM_PROMPT, false, cap);
             return doCall(url, reqBody, PayRiskAssessAiResponse.class);
         }
     }
@@ -69,25 +78,23 @@ public class DeepSeekClient {
         String userPrompt = PayRiskLlmReportPromptBuilder.buildUserPrompt(contextJson);
         String url = baseUrl + "/chat/completions";
 
-        Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, true);
+        int cap = reportMaxTokens != null && reportMaxTokens > 0 ? reportMaxTokens : maxTokens;
+        Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, true, cap);
         try {
             return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
         } catch (Exception firstEx) {
-            log.warn("[DeepSeekClient][generateRiskReport] 绗竴娆¤皟鐢ㄥけ璐ワ紝閲嶈瘯(涓嶅惈 response_format)锛歿}", firstEx.getMessage());
-            reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, false);
+            log.warn("[DeepSeekClient][generateRiskReport] 第一次调用失败，重试(不含 response_format)：{}", firstEx.getMessage());
+            reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, false, cap);
             return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
         }
     }
 
-    private Map<String, Object> buildRequestBody(String userPrompt, boolean withResponseFormat) {
-        return buildRequestBody(userPrompt, PayRiskPromptBuilder.SYSTEM_PROMPT, withResponseFormat);
-    }
-
-    private Map<String, Object> buildRequestBody(String userPrompt, String systemPrompt, boolean withResponseFormat) {
+    private Map<String, Object> buildRequestBody(String userPrompt, String systemPrompt, boolean withResponseFormat,
+                                                  int maxTokensOverride) {
         Map<String, Object> req = new HashMap<>();
         req.put("model", model);
         req.put("temperature", temperature);
-        req.put("max_tokens", maxTokens);
+        req.put("max_tokens", maxTokensOverride);
 
         Map<String, Object> system = new HashMap<>();
         system.put("role", "system");

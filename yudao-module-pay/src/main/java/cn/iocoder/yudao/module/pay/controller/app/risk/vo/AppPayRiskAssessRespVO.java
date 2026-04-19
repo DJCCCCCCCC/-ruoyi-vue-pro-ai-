@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.pay.controller.app.risk.vo;
 
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskRelationTopology;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
@@ -52,4 +53,7 @@ public class AppPayRiskAssessRespVO {
 
     @Schema(description = "历史案例相似性加分", example = "12")
     private Integer caseSimilarityBonus;
+
+    @Schema(description = "策略决策（放行/复核/拦截建议与原因）")
+    private PayRiskDecisionResult decision;
 }

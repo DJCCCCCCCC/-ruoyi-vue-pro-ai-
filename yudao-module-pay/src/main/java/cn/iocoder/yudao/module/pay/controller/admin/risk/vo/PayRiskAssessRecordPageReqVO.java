@@ -29,6 +29,9 @@ public class PayRiskAssessRecordPageReqVO extends PageParam {
     @Schema(description = "IP", example = "8.8.8.8")
     private String ip;
 
+    @Schema(description = "复核状态", example = "PENDING")
+    private String reviewStatus;
+
     @Schema(description = "创建时间")
     @DateTimeFormat(pattern = FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND)
     private LocalDateTime[] createTime;

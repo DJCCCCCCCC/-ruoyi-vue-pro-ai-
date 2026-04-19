@@ -52,5 +52,23 @@ public class PayRiskAssessRecordRespVO {
     private LocalDateTime createTime;
     private String llmReportJson;
     private String advancedAnalysisJson;
+
+    @Schema(description = "策略建议动作")
+    private String decisionAction;
+
+    @Schema(description = "策略决策 JSON")
+    private String decisionJson;
+
+    @Schema(description = "人工复核状态")
+    private String reviewStatus;
+
+    @Schema(description = "复核备注")
+    private String reviewRemark;
+
+    @Schema(description = "复核人")
+    private String reviewer;
+
+    @Schema(description = "复核时间")
+    private LocalDateTime reviewTime;
 }
 

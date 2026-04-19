@@ -10,6 +10,7 @@ public class PayRiskPromptBuilder {
                     + "你将收到脱敏后的支付JSON数据和脱敏后的IP情报JSON数据。"
                     + "请只返回一个严格的JSON对象，包含riskScore、riskLevel、deepAnalysis和riskFactors字段。"
                     + "不要输出markdown或代码块标记。"
+                    + "deepAnalysis 请控制在约 400 汉字以内，条理清晰即可，避免冗长铺陈。"
                     + "所有分析内容请使用中文输出。";
 
     public static String buildUserPrompt(String paymentMaskedJson, String ipInfoMaskedJson) {

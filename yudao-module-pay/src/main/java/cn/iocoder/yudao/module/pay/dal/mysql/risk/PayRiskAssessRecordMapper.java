@@ -18,6 +18,7 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
                 .likeIfPresent(PayRiskAssessRecordDO::getScene, reqVO.getScene())
                 .likeIfPresent(PayRiskAssessRecordDO::getSource, reqVO.getSource())
                 .likeIfPresent(PayRiskAssessRecordDO::getIp, reqVO.getIp())
+                .eqIfPresent(PayRiskAssessRecordDO::getReviewStatus, reqVO.getReviewStatus())
                 .betweenIfPresent(PayRiskAssessRecordDO::getCreateTime, reqVO.getCreateTime())
                 .orderByDesc(PayRiskAssessRecordDO::getId));
     }

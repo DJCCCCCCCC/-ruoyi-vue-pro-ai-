@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(PayProperties.class)
+@EnableConfigurationProperties({PayProperties.class, PayRiskAssessProperties.class})
 public class PayConfiguration {
 
     @Bean

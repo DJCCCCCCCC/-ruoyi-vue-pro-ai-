@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.pay.service.risk;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
@@ -13,36 +14,63 @@ import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAdvancedAnalysisBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
-import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
+import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 
 @Service
 @Slf4j
 public class PayRiskAssessServiceImpl implements PayRiskAssessService {
+
+    /**
+     * 并行执行首次 LLM、Whois、本地规则分析等 IO/CPU 任务，避免串行累加延迟。
+     */
+    private final ExecutorService riskAssessExecutor = Executors.newFixedThreadPool(8, r -> {
+        Thread t = new Thread(r);
+        t.setName("pay-risk-assess-" + t.getId());
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** 二次 LLM 上下文中的 deepAnalysis 上限，控制 token 与耗时 */
+    private static final int LLM_CONTEXT_DEEP_ANALYSIS_MAX_CHARS = 6000;
+
+    @PreDestroy
+    public void shutdownRiskAssessExecutor() {
+        riskAssessExecutor.shutdown();
+    }
 
     @Resource
     private IpInfoClient ipInfoClient;
@@ -55,6 +83,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Resource
     private PayRiskAssessRecordMapper payRiskAssessRecordMapper;
+
+    @Resource
+    private PayRiskDecisionEngine payRiskDecisionEngine;
 
     @Override
     public AppPayRiskAssessRespVO assess(@Valid AppPayRiskAssessReqVO reqVO) {
@@ -75,13 +106,29 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         String paymentMaskedJson = JsonUtils.toJsonString(paymentMaskedJsonNode);
         String ipInfoMaskedJson = JsonUtils.toJsonString(ipInfoMaskedJsonNode);
 
-        PayRiskAssessAiResponse aiResp = deepSeekClient.assess(paymentMaskedJson, ipInfoMaskedJson);
+        CompletableFuture<PayRiskAssessAiResponse> aiFuture = CompletableFuture.supplyAsync(
+                () -> deepSeekClient.assess(paymentMaskedJson, ipInfoMaskedJson), riskAssessExecutor);
+        CompletableFuture<BehaviorAssessBundle> behaviorFuture = CompletableFuture.supplyAsync(
+                () -> assessBehaviorRisk(paymentData), riskAssessExecutor);
+        CompletableFuture<PayRiskLinkAnalyzer.LinkRiskAssessment> linkFuture = CompletableFuture.supplyAsync(
+                () -> PayRiskLinkAnalyzer.analyze(paymentData), riskAssessExecutor);
+        CompletableFuture<PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment> topoFuture =
+                CompletableFuture.supplyAsync(
+                        () -> PayRiskRelationTopologyAnalyzer.analyze(paymentData), riskAssessExecutor);
+        CompletableFuture<WhoisAssessBundle> whoisFuture = CompletableFuture.supplyAsync(
+                () -> assessWhoisRisk(paymentData), riskAssessExecutor);
+        CompletableFuture<PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult> caseFuture =
+                CompletableFuture.supplyAsync(
+                        () -> PayRiskCaseSimilarityAnalyzer.analyze(paymentData, ipInfoMaskedJsonNode, null,
+                                payRiskAssessRecordMapper), riskAssessExecutor);
 
-        BehaviorAssessBundle behaviorAssessBundle = assessBehaviorRisk(paymentData);
-        PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = PayRiskLinkAnalyzer.analyze(paymentData);
-        PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment topologyRiskAssessment =
-                PayRiskRelationTopologyAnalyzer.analyze(paymentData);
-        WhoisAssessBundle whoisAssessBundle = assessWhoisRisk(paymentData);
+        CompletableFuture.allOf(aiFuture, behaviorFuture, linkFuture, topoFuture, whoisFuture, caseFuture).join();
+
+        PayRiskAssessAiResponse aiResp = joinCf(aiFuture);
+        BehaviorAssessBundle behaviorAssessBundle = joinCf(behaviorFuture);
+        PayRiskLinkAnalyzer.LinkRiskAssessment linkRiskAssessment = joinCf(linkFuture);
+        PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment topologyRiskAssessment = joinCf(topoFuture);
+        WhoisAssessBundle whoisAssessBundle = joinCf(whoisFuture);
         PayRiskWhoisAnalyzer.WhoisRiskAssessment whoisRiskAssessment = whoisAssessBundle.getAssessment();
 
         PayRiskAssessAiResponse mergedResp = mergeExternalRisk(aiResp,
@@ -105,8 +152,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 whoisRiskAssessment.getNotes(),
                 "Whois 情报");
 
-        PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult =
-                PayRiskCaseSimilarityAnalyzer.analyze(paymentData, ipInfoMaskedJsonNode, null, payRiskAssessRecordMapper);
+        PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult = joinCf(caseFuture);
         mergedResp = mergeExternalRisk(mergedResp,
                 caseSimilarityResult.getBonusScore(),
                 caseSimilarityResult.getRiskFactors(),
@@ -149,11 +195,16 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             log.info("[assess] ✅ 已将格式化的 Whois 详情加入 deepAnalysis");
         }
 
-        respVO.setLlmReport(buildLlmAnalysisReport(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode));
+        respVO.setLlmReport(buildLlmAnalysisReport(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode,
+                caseSimilarityResult));
         respVO.setAdvancedAnalysis(buildAdvancedAnalysis(paymentData, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
         if (respVO.getAdvancedAnalysis() != null) {
             respVO.getAdvancedAnalysis().setCaseMatches(caseSimilarityResult.getMatches());
         }
+
+        PayRiskDecisionResult decision = payRiskDecisionEngine.decide(respVO.getRiskScore(), respVO.getRiskLevel(),
+                respVO.getCaseSimilarityBonus(), respVO.getLlmReport());
+        respVO.setDecision(decision);
 
         saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
         return respVO;
@@ -176,6 +227,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("advancedAnalysis", respVO.getAdvancedAnalysis());
         result.put("caseSimilarityBonus", respVO.getCaseSimilarityBonus());
         result.put("caseSimilarityMatches", respVO.getAdvancedAnalysis() == null ? null : respVO.getAdvancedAnalysis().getCaseMatches());
+        result.put("decision", respVO.getDecision());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 
@@ -195,6 +247,42 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Override
     public void clearRiskAssessRecords() {
         payRiskAssessRecordMapper.deleteAllPhysically();
+    }
+
+    @Override
+    public void reviewRiskAssessRecord(PayRiskAssessReviewReqVO reqVO) {
+        PayRiskAssessRecordDO record = payRiskAssessRecordMapper.selectById(reqVO.getId());
+        if (record == null) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_RECORD_NOT_FOUND);
+        }
+        if (!PayRiskReviewStatusConstants.PENDING.equals(record.getReviewStatus())) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_REVIEW_STATUS_INVALID);
+        }
+        String action = reqVO.getReviewAction() == null ? "" : reqVO.getReviewAction().trim().toUpperCase();
+        String newStatus;
+        switch (action) {
+            case "PASS":
+                newStatus = PayRiskReviewStatusConstants.RESOLVED_PASS;
+                break;
+            case "BLOCK":
+                newStatus = PayRiskReviewStatusConstants.RESOLVED_BLOCK;
+                break;
+            case "DISMISS":
+                newStatus = PayRiskReviewStatusConstants.DISMISSED;
+                break;
+            default:
+                throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_REVIEW_ACTION_INVALID);
+        }
+        record.setReviewStatus(newStatus);
+        record.setReviewRemark(reqVO.getRemark());
+        record.setReviewTime(LocalDateTime.now());
+        String reviewer = SecurityFrameworkUtils.getLoginUserNickname();
+        if (StrUtil.isEmpty(reviewer)) {
+            Long uid = SecurityFrameworkUtils.getLoginUserId();
+            reviewer = uid != null ? String.valueOf(uid) : "anonymous";
+        }
+        record.setReviewer(reviewer);
+        payRiskAssessRecordMapper.updateById(record);
     }
 
     private BehaviorAssessBundle assessBehaviorRisk(JsonNode paymentData) {
@@ -298,8 +386,10 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     private PayRiskLlmAnalysisReport buildLlmAnalysisReport(JsonNode paymentMaskedJsonNode,
                                                             JsonNode ipInfoMaskedJsonNode,
                                                             AppPayRiskAssessRespVO respVO,
-                                                            JsonNode whoisInfoNode) {
-        JsonNode contextNode = buildLlmContext(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode);
+                                                            JsonNode whoisInfoNode,
+                                                            PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult) {
+        JsonNode contextNode = buildLlmContext(paymentMaskedJsonNode, ipInfoMaskedJsonNode, respVO, whoisInfoNode,
+                caseSimilarityResult);
         try {
             PayRiskLlmAnalysisReport report = deepSeekClient.generateRiskReport(JsonUtils.toJsonString(contextNode));
             if (report != null && (report.getMode() == null || report.getMode().trim().isEmpty())) {
@@ -315,17 +405,22 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     private JsonNode buildLlmContext(JsonNode paymentMaskedJsonNode,
                                      JsonNode ipInfoMaskedJsonNode,
                                      AppPayRiskAssessRespVO respVO,
-                                     JsonNode whoisInfoNode) {
+                                     JsonNode whoisInfoNode,
+                                     PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult) {
         ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
 
         ObjectNode assessmentNode = root.putObject("assessment");
         assessmentNode.put("riskScore", respVO.getRiskScore() == null ? 0 : respVO.getRiskScore());
         assessmentNode.put("riskLevel", respVO.getRiskLevel() == null ? "LOW" : respVO.getRiskLevel());
-        assessmentNode.put("deepAnalysis", respVO.getDeepAnalysis() == null ? "" : respVO.getDeepAnalysis());
+        assessmentNode.put("deepAnalysis", truncateForPrompt(respVO.getDeepAnalysis(), LLM_CONTEXT_DEEP_ANALYSIS_MAX_CHARS));
         assessmentNode.putPOJO("riskFactors", respVO.getRiskFactors() == null ? new ArrayList<>() : respVO.getRiskFactors());
 
         if (paymentMaskedJsonNode != null && !paymentMaskedJsonNode.isNull()) {
             root.set("paymentData", paymentMaskedJsonNode);
+            JsonNode userProfile = paymentMaskedJsonNode.path("userProfile");
+            if (userProfile != null && !userProfile.isNull() && userProfile.size() > 0) {
+                root.set("userProfile", userProfile);
+            }
         }
         if (ipInfoMaskedJsonNode != null && !ipInfoMaskedJsonNode.isNull()) {
             root.set("ipInfo", ipInfoMaskedJsonNode);
@@ -337,9 +432,143 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             root.set("topology", JsonUtils.parseTree(JsonUtils.toJsonString(respVO.getTopologyInfo())));
         }
         if (whoisInfoNode != null && !whoisInfoNode.isNull()) {
-            root.set("whois", whoisInfoNode);
+            root.set("whois", slimWhoisForLlm(whoisInfoNode));
+        }
+        ArrayNode similarCases = buildHistoricalSimilarCasesForLlm(caseSimilarityResult);
+        if (similarCases.size() > 0) {
+            root.set("historicalSimilarCases", similarCases);
         }
         return root;
+    }
+
+    /**
+     * 将少量历史相似案例摘要注入 LLM 上下文，用于对照「已知族系 / 变体 / 相对新型」判断（检索增强，非模型权重训练）。
+     */
+    private ArrayNode buildHistoricalSimilarCasesForLlm(PayRiskCaseSimilarityAnalyzer.CaseSimilarityResult caseSimilarityResult) {
+        ArrayNode arr = JsonUtils.getObjectMapper().createArrayNode();
+        if (caseSimilarityResult == null || caseSimilarityResult.getMatches() == null) {
+            return arr;
+        }
+        int added = 0;
+        for (PayRiskAdvancedAnalysis.CaseSimilarityMatch match : caseSimilarityResult.getMatches()) {
+            if (added >= 3) {
+                break;
+            }
+            if (match == null || match.getRecordId() == null) {
+                continue;
+            }
+            PayRiskAssessRecordDO past = payRiskAssessRecordMapper.selectById(match.getRecordId());
+            if (past == null) {
+                continue;
+            }
+            ObjectNode item = arr.addObject();
+            item.put("recordId", past.getId());
+            item.put("similarity", match.getSimilarity() == null ? 0d : match.getSimilarity());
+            item.put("riskLevel", past.getRiskLevel() == null ? "" : past.getRiskLevel());
+            item.put("riskScore", past.getRiskScore() == null ? 0 : past.getRiskScore());
+            item.put("scene", past.getScene() == null ? "" : past.getScene());
+            item.put("matchedReasons", truncateForPrompt(match.getMatchedReasons(), 240));
+            JsonNode pastLlm = parseJsonSafe(past.getLlmReportJson());
+            if (pastLlm != null && !pastLlm.isNull()) {
+                item.put("pastFraudFamily", truncateForPrompt(textOrEmpty(pastLlm, "fraudFamily"), 120));
+                item.put("pastVariantLabel", truncateForPrompt(textOrEmpty(pastLlm, "variantLabel"), 120));
+                item.put("pastNoveltyLevel", truncateForPrompt(textOrEmpty(pastLlm, "noveltyLevel"), 64));
+                item.put("pastSummary", truncateForPrompt(textOrEmpty(pastLlm, "summary"), 280));
+                item.put("pastVerdict", truncateForPrompt(textOrEmpty(pastLlm, "verdict"), 280));
+            } else {
+                item.put("pastSummary", truncateForPrompt(past.getDeepAnalysis(), 280));
+            }
+            added++;
+        }
+        return arr;
+    }
+
+    private static JsonNode parseJsonSafe(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return JsonUtils.parseTree(json);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    private static String textOrEmpty(JsonNode node, String field) {
+        if (node == null || node.isNull()) {
+            return "";
+        }
+        JsonNode v = node.path(field);
+        return v.isMissingNode() || v.isNull() ? "" : v.asText("");
+    }
+
+    private static String truncateForPrompt(String s, int maxLen) {
+        if (s == null) {
+            return "";
+        }
+        String t = s.trim();
+        if (t.length() <= maxLen) {
+            return t;
+        }
+        return t.substring(0, maxLen) + "…";
+    }
+
+    /**
+     * 去掉 Whois 原始 payload，仅保留评分因子与域名级摘要，显著缩小二次 LLM 请求体。
+     */
+    private static JsonNode slimWhoisForLlm(JsonNode whois) {
+        if (whois == null || whois.isNull()) {
+            return whois;
+        }
+        ObjectNode out = JsonUtils.getObjectMapper().createObjectNode();
+        out.put("extraScore", whois.path("extraScore").asInt(0));
+        JsonNode factors = whois.path("factors");
+        if (!factors.isMissingNode() && !factors.isNull()) {
+            out.set("factors", factors);
+        }
+        JsonNode notes = whois.path("notes");
+        if (!notes.isMissingNode() && !notes.isNull()) {
+            out.set("notes", notes);
+        }
+        ArrayNode slimRecords = out.putArray("records");
+        JsonNode records = whois.path("records");
+        if (records.isArray()) {
+            int n = 0;
+            for (JsonNode rec : records) {
+                if (n++ >= 8) {
+                    break;
+                }
+                ObjectNode item = slimRecords.addObject();
+                item.put("domain", rec.path("domain").asText(""));
+                JsonNode payload = rec.path("payload");
+                String registrar = "";
+                if (!payload.isMissingNode() && !payload.isNull()) {
+                    JsonNode whoisRecord = payload.path("WhoisRecord");
+                    registrar = whoisRecord.path("registrarName").asText("");
+                    if (registrar.isEmpty()) {
+                        registrar = whoisRecord.path("registryData").path("registrarName").asText("");
+                    }
+                }
+                item.put("registrarName", truncateForPrompt(registrar, 200));
+            }
+        }
+        out.put("detailLevel", "summary_only");
+        return out;
+    }
+
+    private static <T> T joinCf(CompletableFuture<T> cf) {
+        try {
+            return cf.join();
+        } catch (CompletionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException(cause);
+        }
     }
 
     private PayRiskAdvancedAnalysis buildAdvancedAnalysis(JsonNode paymentData,
@@ -367,6 +596,16 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         record.setTopologyInfoJson(JsonUtils.toJsonString(respVO.getTopologyInfo()));
         record.setLlmReportJson(JsonUtils.toJsonString(respVO.getLlmReport()));
         record.setAdvancedAnalysisJson(JsonUtils.toJsonString(respVO.getAdvancedAnalysis()));
+        PayRiskDecisionResult decision = respVO.getDecision();
+        if (decision != null) {
+            record.setDecisionAction(decision.getRecommendedAction());
+            record.setDecisionJson(JsonUtils.toJsonString(decision));
+            record.setReviewStatus(decision.isRequiresHumanReview()
+                    ? PayRiskReviewStatusConstants.PENDING
+                    : PayRiskReviewStatusConstants.NOT_REQUIRED);
+        } else {
+            record.setReviewStatus(PayRiskReviewStatusConstants.NOT_REQUIRED);
+        }
         try {
             payRiskAssessRecordMapper.insert(record);
         } catch (Exception ex) {

@@ -11,6 +11,54 @@
       </div>
     </section>
 
+    <ContentWrap class="panel invoke-assess-panel">
+      <div class="panel-head invoke-head">
+        <div>
+          <h3>发起评估（调试）</h3>
+          <p>提交到与 App 相同的评估接口；可选「本人情况」会写入 paymentData.userProfile，供 LLM 生成个性化防诈说明。</p>
+        </div>
+      </div>
+      <el-form label-width="100px" class="invoke-form">
+        <el-form-item label="客户端 IP">
+          <el-input v-model="assessIp" placeholder="用于 IP 情报，如 8.8.8.8" clearable style="max-width: 320px" />
+        </el-form-item>
+        <el-form-item label="本人情况">
+          <div class="profile-inline">
+            <el-select v-model="userAgeBand" placeholder="年龄段" clearable style="width: 160px">
+              <el-option label="未成年" value="UNDER_18" />
+              <el-option label="青年" value="YOUNG_ADULT" />
+              <el-option label="中年" value="MIDDLE_AGED" />
+              <el-option label="中老年" value="SENIOR" />
+            </el-select>
+            <el-select v-model="userPersonality" placeholder="个性倾向" clearable style="width: 200px">
+              <el-option label="偏焦虑 / 易紧张" value="ANXIOUS" />
+              <el-option label="偏谨慎" value="CAUTIOUS" />
+              <el-option label="对手机网银不熟" value="DIGITAL_NOVICE" />
+              <el-option label="较信「官方/警察」口吻" value="AUTHORITY_TRUSTING" />
+              <el-option label="容易匆忙做决定" value="IMPULSIVE" />
+            </el-select>
+            <el-select v-model="userRiskLiteracy" placeholder="防诈了解" clearable style="width: 140px">
+              <el-option label="较少了解" value="LOW" />
+              <el-option label="一般" value="MEDIUM" />
+              <el-option label="较熟悉" value="HIGH" />
+            </el-select>
+          </div>
+        </el-form-item>
+        <el-form-item label="paymentData">
+          <el-input
+            v-model="assessPaymentJson"
+            type="textarea"
+            :rows="14"
+            class="json-textarea"
+            placeholder="JSON"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="assessSubmitting" @click="handleInvokeAssess">提交评估</el-button>
+        </el-form-item>
+      </el-form>
+    </ContentWrap>
+
     <section class="overview-grid">
       <ContentWrap class="panel metric-card">
         <span>风险评分</span>
@@ -33,6 +81,19 @@
       <ContentWrap class="panel metric-card">
         <span>历史案例加分</span>
         <strong>+{{ caseSimilarityBonus }}</strong>
+      </ContentWrap>
+
+      <ContentWrap class="panel metric-card decision-metric-card">
+        <span>策略 / 复核</span>
+        <div class="decision-metric">
+          <el-tag v-if="selectedResult?.decision?.recommendedAction" :type="decisionTagType(selectedResult.decision.recommendedAction)" size="large">
+            {{ selectedResult.decision.recommendedAction }}
+          </el-tag>
+          <span v-else class="muted">—</span>
+          <el-tag v-if="selectedRecord?.reviewStatus" size="small" effect="plain" class="review-pill">
+            {{ reviewStatusLabel(selectedRecord.reviewStatus) }}
+          </el-tag>
+        </div>
       </ContentWrap>
     </section>
 
@@ -69,6 +130,19 @@
     </section>
 
     <section v-if="selectedResult" class="detail-stack">
+      <ContentWrap v-if="selectedResult.decision" class="panel decision-panel">
+        <div class="panel-head decision-head">
+          <div>
+            <h3>策略决策与闭环</h3>
+            <p class="decision-hint">{{ selectedResult.decision.reviewHint }}</p>
+          </div>
+          <el-tag v-if="selectedRecord?.reviewStatus" type="info">{{ reviewStatusLabel(selectedRecord.reviewStatus) }}</el-tag>
+        </div>
+        <ul class="reason-list">
+          <li v-for="(m, idx) in selectedResult.decision.reasonMessages" :key="idx">{{ m }}</li>
+        </ul>
+      </ContentWrap>
+
       <LlmRiskReportPanel :report="selectedResult?.llmReport" />
       <ContentWrap v-if="selectedResult.caseSimilarityBonus" class="panel metric-inline">
         <span>历史案例加分</span>
@@ -109,6 +183,19 @@
           <p>点击“查看”即可加载详情面板</p>
         </div>
         <div class="table-actions">
+          <el-select
+            v-model="recordQuery.reviewStatus"
+            placeholder="复核状态"
+            clearable
+            style="width: 140px; margin-right: 8px"
+            @change="refreshRecordList"
+          >
+            <el-option label="待复核" value="PENDING" />
+            <el-option label="无需复核" value="NOT_REQUIRED" />
+            <el-option label="已放行" value="RESOLVED_PASS" />
+            <el-option label="已拦截" value="RESOLVED_BLOCK" />
+            <el-option label="误报结案" value="DISMISSED" />
+          </el-select>
           <el-button type="primary" :loading="recordLoading" @click="refreshRecordList">刷新记录</el-button>
           <el-button
             type="danger"
@@ -138,9 +225,30 @@
           </template>
         </el-table-column>
         <el-table-column label="分数" prop="riskScore" width="90" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="策略" prop="decisionAction" width="130">
+          <template #default="scope">
+            <el-tag v-if="scope.row.decisionAction" size="small" :type="decisionTagType(scope.row.decisionAction)">
+              {{ scope.row.decisionAction }}
+            </el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="复核" prop="reviewStatus" width="110">
+          <template #default="scope">
+            <span>{{ reviewStatusLabel(scope.row.reviewStatus) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="handleUseRecord(scope.row)">查看</el-button>
+            <el-button
+              v-if="scope.row.reviewStatus === 'PENDING'"
+              link
+              type="warning"
+              @click="openReviewDialog(scope.row)"
+            >
+              复核
+            </el-button>
             <el-button link type="danger" @click="handleDeleteRecord(scope.row)">删除</el-button>
           </template>
         </el-table-column>
@@ -153,6 +261,25 @@
         @pagination="getRecordList"
       />
     </ContentWrap>
+
+    <el-dialog v-model="reviewDialogVisible" title="人工复核" width="440px" destroy-on-close>
+      <el-form label-width="88px">
+        <el-form-item label="复核动作">
+          <el-radio-group v-model="reviewForm.reviewAction">
+            <el-radio-button label="PASS">放行</el-radio-button>
+            <el-radio-button label="BLOCK">确认拦截</el-radio-button>
+            <el-radio-button label="DISMISS">误报结案</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="reviewForm.remark" type="textarea" :rows="3" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reviewDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="reviewSubmitting" @click="submitReview">提交</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -167,14 +294,40 @@ import LlmRiskReportPanel from './components/LlmRiskReportPanel.vue'
 import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
 import ThreatIntelPanel from './components/ThreatIntelPanel.vue'
 import {
+  assessPayRisk,
   clearPayRiskAssessRecords,
   deletePayRiskAssessRecord,
   getPayRiskAssessRecordPage,
+  reviewPayRiskAssessRecord,
   type PayRiskAssessRecordVO,
   type PayRiskAssessRespVO
 } from '@/api/pay/risk/assess'
 
 defineOptions({ name: 'PayRiskAssess' })
+
+const DEFAULT_ASSESS_PAYMENT_JSON = `{
+  "scene": "ADMIN_DESK_RISK",
+  "source": "pay-risk-assess-page",
+  "messageCount": 2,
+  "linkCount": 1,
+  "links": ["https://example-phishing.test/verify"],
+  "detectedSignals": ["链接", "转账催促"],
+  "latestPeerMessage": "请点击链接完成验证并尽快转账，三分钟内有效。",
+  "messages": [
+    {
+      "role": "peer",
+      "senderName": "对方",
+      "content": "请点击链接完成验证并尽快转账，三分钟内有效。",
+      "timestamp": "2026-01-15T10:00:00.000Z"
+    },
+    {
+      "role": "self",
+      "senderName": "我",
+      "content": "这是什么链接？",
+      "timestamp": "2026-01-15T10:01:00.000Z"
+    }
+  ]
+}`
 
 echarts.registerMap('world', worldGeoJson as any)
 
@@ -195,8 +348,24 @@ let globalRiskMapChart: echarts.ECharts | null = null
 
 const recordQuery = reactive({
   pageNo: 1,
-  pageSize: 10
+  pageSize: 10,
+  reviewStatus: '' as string
 })
+
+const reviewDialogVisible = ref(false)
+const reviewSubmitting = ref(false)
+const reviewTargetId = ref<number | null>(null)
+const reviewForm = reactive({
+  reviewAction: 'PASS' as 'PASS' | 'BLOCK' | 'DISMISS',
+  remark: ''
+})
+
+const assessSubmitting = ref(false)
+const assessIp = ref('8.8.8.8')
+const assessPaymentJson = ref(DEFAULT_ASSESS_PAYMENT_JSON)
+const userAgeBand = ref('')
+const userPersonality = ref('')
+const userRiskLiteracy = ref('')
 
 const parseJsonText = (jsonText?: string, fallback: any = {}) => {
   if (!jsonText) return fallback
@@ -220,6 +389,16 @@ const unwrapRecordPage = (data: any): { list: PayRiskAssessRecordVO[]; total: nu
 const selectedResult = computed<PayRiskAssessRespVO | null>(() => {
   if (!selectedRecord.value) return null
   const record = selectedRecord.value
+  const advancedAnalysis = parseJsonText(record.advancedAnalysisJson, undefined)
+  let caseBonus = 0
+  if (advancedAnalysis?.caseMatches?.length) {
+    caseBonus = Math.min(
+      20,
+      advancedAnalysis.caseMatches.reduce((sum: number, item: { bonusScore?: number }) => {
+        return sum + Number(item.bonusScore || 0)
+      }, 0)
+    )
+  }
   return {
     riskScore: record.riskScore,
     riskLevel: record.riskLevel,
@@ -230,7 +409,9 @@ const selectedResult = computed<PayRiskAssessRespVO | null>(() => {
     behaviorInfo: parseJsonText(record.behaviorInfoJson, undefined),
     topologyInfo: parseJsonText(record.topologyInfoJson, undefined),
     llmReport: parseJsonText(record.llmReportJson, undefined),
-    advancedAnalysis: parseJsonText(record.advancedAnalysisJson, undefined)
+    advancedAnalysis,
+    caseSimilarityBonus: caseBonus,
+    decision: parseJsonText(record.decisionJson, undefined)
   }
 })
 
@@ -559,7 +740,10 @@ const enrichRecordIpGeo = async () => {
 const getRecordList = async () => {
   recordLoading.value = true
   try {
-    const data = await getPayRiskAssessRecordPage(recordQuery)
+    const data = await getPayRiskAssessRecordPage({
+      ...recordQuery,
+      reviewStatus: recordQuery.reviewStatus || undefined
+    })
     const page = unwrapRecordPage(data)
 
     if (page.total > 0 && page.list.length === 0 && recordQuery.pageNo > 1) {
@@ -592,6 +776,49 @@ const getRecordList = async () => {
 const refreshRecordList = async () => {
   recordQuery.pageNo = 1
   await getRecordList()
+}
+
+const handleInvokeAssess = async () => {
+  let paymentData: Record<string, unknown>
+  try {
+    paymentData = JSON.parse(assessPaymentJson.value) as Record<string, unknown>
+  } catch {
+    message.error('paymentData 不是合法 JSON，请检查格式')
+    return
+  }
+
+  const profile: Record<string, string> = {}
+  if (userAgeBand.value) {
+    profile.ageBand = userAgeBand.value
+  }
+  if (userPersonality.value) {
+    profile.personalityHint = userPersonality.value
+  }
+  if (userRiskLiteracy.value) {
+    profile.riskLiteracy = userRiskLiteracy.value
+  }
+  if (Object.keys(profile).length > 0) {
+    paymentData.userProfile = profile
+  }
+
+  assessSubmitting.value = true
+  try {
+    await assessPayRisk({
+      ip: (assessIp.value || '').trim() || undefined,
+      paymentData
+    })
+    await refreshRecordList()
+    if (recordList.value.length > 0) {
+      selectedRecord.value = recordList.value[0]
+      message.success(`评估已完成，已选中最新记录 #${recordList.value[0].id}`)
+    } else {
+      message.success('评估已完成')
+    }
+  } catch (error: any) {
+    message.error(error?.message || '评估请求失败')
+  } finally {
+    assessSubmitting.value = false
+  }
 }
 
 const handleUseRecord = (record: PayRiskAssessRecordVO) => {
@@ -652,6 +879,66 @@ const riskTagType = (riskLevel?: string) => {
   }
 }
 
+const decisionTagType = (action?: string) => {
+  switch ((action || '').toUpperCase()) {
+    case 'ALLOW':
+      return 'success'
+    case 'MANUAL_REVIEW':
+      return 'warning'
+    case 'BLOCK':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const reviewStatusLabel = (status?: string) => {
+  switch ((status || '').toUpperCase()) {
+    case 'PENDING':
+      return '待复核'
+    case 'NOT_REQUIRED':
+      return '无需复核'
+    case 'RESOLVED_PASS':
+      return '已放行'
+    case 'RESOLVED_BLOCK':
+      return '已拦截'
+    case 'DISMISSED':
+      return '误报结案'
+    default:
+      return status || '—'
+  }
+}
+
+const openReviewDialog = (record: PayRiskAssessRecordVO) => {
+  reviewTargetId.value = record.id
+  reviewForm.reviewAction = 'PASS'
+  reviewForm.remark = ''
+  reviewDialogVisible.value = true
+}
+
+const submitReview = async () => {
+  if (reviewTargetId.value == null) return
+  reviewSubmitting.value = true
+  try {
+    await reviewPayRiskAssessRecord({
+      id: reviewTargetId.value,
+      reviewAction: reviewForm.reviewAction,
+      remark: reviewForm.remark
+    })
+    reviewDialogVisible.value = false
+    message.success('复核已提交')
+    await getRecordList()
+    const updated = recordList.value.find((r) => r.id === reviewTargetId.value)
+    if (updated) {
+      selectedRecord.value = updated
+    }
+  } catch (error: any) {
+    message.error(error?.message || '复核失败')
+  } finally {
+    reviewSubmitting.value = false
+  }
+}
+
 watch(recordList, async () => {
   await nextTick()
   renderDashboardCharts()
@@ -678,6 +965,31 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss" scoped>
+.invoke-assess-panel {
+  border-radius: 14px;
+}
+
+.invoke-head h3 {
+  margin: 0 0 4px;
+}
+
+.invoke-form {
+  max-width: 960px;
+}
+
+.profile-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.json-textarea :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .risk-assess-page {
   min-height: 100%;
   padding: 14px;
@@ -779,6 +1091,43 @@ onBeforeUnmount(() => {
 .metric-card strong small {
   font-size: 14px;
   color: #6d8bae;
+}
+
+.decision-metric-card .decision-metric {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.decision-metric .muted,
+.muted {
+  color: #8aa3bc;
+  font-size: 13px;
+}
+
+.review-pill {
+  margin-left: 4px;
+}
+
+.decision-panel .decision-head {
+  align-items: flex-start;
+}
+
+.decision-hint {
+  margin: 6px 0 0;
+  color: #5f7f9f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reason-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #2c4a66;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .risk-level-tag {

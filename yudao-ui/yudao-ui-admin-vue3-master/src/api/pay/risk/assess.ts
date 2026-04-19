@@ -11,6 +11,15 @@ export interface PayRiskAssessReqVO {
   paymentData: PayRiskAssessPaymentData
 }
 
+export interface PayRiskDecisionResult {
+  policyVersion?: string
+  recommendedAction?: 'ALLOW' | 'MANUAL_REVIEW' | 'BLOCK' | string
+  reasonCodes?: string[]
+  reasonMessages?: string[]
+  requiresHumanReview?: boolean
+  reviewHint?: string
+}
+
 export interface PayRiskAssessRespVO {
   riskScore: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
@@ -22,16 +31,39 @@ export interface PayRiskAssessRespVO {
   topologyInfo?: PayRiskRelationTopology
   llmReport?: PayRiskLlmReport
   advancedAnalysis?: PayRiskAdvancedAnalysis
+  caseSimilarityBonus?: number
+  decision?: PayRiskDecisionResult
+}
+
+export interface PayRiskLlmPersonaProfile {
+  summary?: string
+  claimedOrImpliedRole?: string
+  inferredArchetype?: string
+  communicationTraits?: string[]
+  pressureAndControlSignals?: string[]
+}
+
+export interface PayRiskLlmTailoredUserGuidance {
+  whyLikelyScamPlainLanguage?: string
+  preventionTipsForThisUser?: string[]
+  reassuranceLine?: string
 }
 
 export interface PayRiskLlmReport {
   mode?: string
   summary?: string
+  fraudFamily?: string
+  variantLabel?: string
+  noveltyLevel?: 'KNOWN_VARIANT' | 'EMERGING_PATTERN' | 'NOVEL_COMBO' | string
+  noveltyScore?: number
   verdict?: string
   confidence?: 'LOW' | 'MEDIUM' | 'HIGH' | string
   evidence?: string[]
   suspiciousEntities?: string[]
+  preventionFocus?: string[]
   recommendations?: string[]
+  personaProfile?: PayRiskLlmPersonaProfile
+  tailoredUserGuidance?: PayRiskLlmTailoredUserGuidance
 }
 
 export interface PayRiskAdvancedAnalysis {
@@ -134,6 +166,12 @@ export interface PayRiskAssessRecordVO {
   topologyInfoJson?: string
   llmReportJson?: string
   advancedAnalysisJson?: string
+  decisionAction?: string
+  decisionJson?: string
+  reviewStatus?: string
+  reviewRemark?: string
+  reviewer?: string
+  reviewTime?: string
   createTime: string
 }
 
@@ -144,6 +182,7 @@ export interface PayRiskAssessRecordPageReqVO {
   scene?: string
   source?: string
   ip?: string
+  reviewStatus?: string
   createTime?: [string, string]
 }
 
@@ -182,5 +221,16 @@ export const deletePayRiskAssessRecord = async (id: number) => {
 
 export const clearPayRiskAssessRecords = async () => {
   const resp = await axios.post(`${API_PREFIX}/pay/risk/clear`)
+  return resp?.data?.data ?? resp?.data ?? resp
+}
+
+export interface PayRiskAssessReviewReqVO {
+  id: number
+  reviewAction: 'PASS' | 'BLOCK' | 'DISMISS'
+  remark?: string
+}
+
+export const reviewPayRiskAssessRecord = async (data: PayRiskAssessReviewReqVO) => {
+  const resp = await axios.post(`${API_PREFIX}/pay/risk/review`, data)
   return resp?.data?.data ?? resp?.data ?? resp
 }
