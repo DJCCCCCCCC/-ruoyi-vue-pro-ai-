@@ -106,5 +106,6 @@ public interface ErrorCodeConstants {
     ErrorCode PAY_RISK_ASSESS_REVIEW_ACTION_INVALID = new ErrorCode(1_007_010_008, "复核动作不合法，应为 PASS / BLOCK / DISMISS");
     ErrorCode PAY_RISK_ASSESS_TERM_PARAM_INVALID = new ErrorCode(1_007_010_009, "风险词参数不合法");
     ErrorCode PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW = new ErrorCode(1_007_010_010, "该风险词不在今日新增列表中，无法查看穿透详情");
+    ErrorCode PAY_RISK_IMAGE_ANALYZE_NO_VALID_DATA_URL = new ErrorCode(1_007_010_011, "未检测到有效的图片 data URL，请使用 data:image/...;base64,... 格式");
 
 }

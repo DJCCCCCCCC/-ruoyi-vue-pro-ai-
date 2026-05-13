@@ -49,6 +49,10 @@ public class DeepSeekClient {
     @Value("${yudao.pay.risk-assess.http-timeout-millis:20000}")
     private Integer timeoutMillis;
 
+    /** 图片 OCR 专项解读：纯文本输出，非 JSON */
+    @Value("${yudao.pay.risk-assess.deepseek.image-ocr-narrative-max-tokens:640}")
+    private Integer imageOcrNarrativeMaxTokens;
+
     public PayRiskAssessAiResponse assess(String paymentMaskedJson, String ipInfoMaskedJson) {
         if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
@@ -89,6 +93,26 @@ public class DeepSeekClient {
         }
     }
 
+    /**
+     * 根据 OCR 合并文本，用自然语言概括图中文字可能涉及的支付/诈骗场景与风险点（不返回 JSON）。
+     */
+    public String analyzeImageOcrNarrative(String ocrMergedText) {
+        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+            return null;
+        }
+        if (ocrMergedText == null || ocrMergedText.trim().isEmpty()) {
+            return null;
+        }
+        String system = "你是支付风控与反诈分析助手。用户将提供从聊天截图或转账凭证中 OCR 得到的文字（可能多图合并）。"
+                + "请用中文分条简洁说明：① 图中文字大致在讲什么；② 是否出现转账、验证码、公检法、刷单、理财、钓鱼链接等高风险话术；"
+                + "③ 对一线审核员的提醒（不要重复粘贴 OCR 原文）。总字数控制在 600 字以内，不要编造 OCR 中不存在的具体数字或姓名。";
+        String user = "以下为 OCR 文本：\n\n" + ocrMergedText.trim();
+        int cap = imageOcrNarrativeMaxTokens != null && imageOcrNarrativeMaxTokens > 0 ? imageOcrNarrativeMaxTokens : 640;
+        Map<String, Object> reqBody = buildRequestBody(user, system, false, cap);
+        String url = baseUrl + "/chat/completions";
+        return doCallPlainText(url, reqBody);
+    }
+
     private Map<String, Object> buildRequestBody(String userPrompt, String systemPrompt, boolean withResponseFormat,
                                                   int maxTokensOverride) {
         Map<String, Object> req = new HashMap<>();
@@ -111,6 +135,31 @@ public class DeepSeekClient {
             req.put("response_format", responseFormat);
         }
         return req;
+    }
+
+    private String doCallPlainText(String url, Map<String, Object> reqBody) {
+        try (HttpResponse response = HttpUtil.createPost(url)
+                .header("Authorization", "Bearer " + deepseekApiKey)
+                .header("Content-Type", "application/json")
+                .timeout(timeoutMillis)
+                .body(JsonUtils.toJsonString(reqBody))
+                .execute()) {
+            String body = response.body();
+            JsonNode root = JsonUtils.parseTree(body);
+            if (root.path("choices").isArray() && root.path("choices").size() > 0) {
+                JsonNode contentNode = root.path("choices").get(0).path("message").path("content");
+                if (!contentNode.isMissingNode() && contentNode.isTextual()) {
+                    String content = contentNode.asText();
+                    if (content != null && !content.isBlank()) {
+                        return content.trim();
+                    }
+                }
+            }
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, body);
+        } catch (Exception e) {
+            log.error("[DeepSeekClient][doCallPlainText] 调用 DeepSeek 失败", e);
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, e.getMessage());
+        }
     }
 
     private <T> T doCall(String url, Map<String, Object> reqBody, Class<T> resultType) {

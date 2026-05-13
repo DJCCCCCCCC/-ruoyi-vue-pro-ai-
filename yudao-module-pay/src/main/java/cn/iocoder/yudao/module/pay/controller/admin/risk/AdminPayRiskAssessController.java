@@ -7,6 +7,8 @@ import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
@@ -49,6 +51,13 @@ public class AdminPayRiskAssessController {
     @PermitAll
     public CommonResult<AppPayRiskAssessRespVO> assess(@RequestBody AppPayRiskAssessReqVO reqVO) {
         return success(payRiskAssessService.assess(reqVO));
+    }
+
+    @PostMapping("/image-ocr-analyze")
+    @Operation(summary = "图片 OCR 专项分析（可选 LLM 解读图中文字含义与风险点）")
+    @PermitAll
+    public CommonResult<PayRiskImageOcrAnalyzeRespVO> analyzeImageOcr(@Valid @RequestBody PayRiskImageOcrAnalyzeReqVO reqVO) {
+        return success(payRiskAssessService.analyzeImageOcr(reqVO));
     }
 
     @GetMapping("/page")

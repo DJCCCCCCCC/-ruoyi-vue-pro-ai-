@@ -225,6 +225,23 @@ export interface PayRiskAssessRecordPageResult {
   total: number
 }
 
+export interface PayRiskImageOcrAnalyzeReqVO {
+  imageDataUrls: string[]
+  includeLlmInsight?: boolean
+}
+
+export interface PayRiskImageOcrAnalyzeRespVO {
+  embeddedImageCount?: number
+  ocrServiceEnabled?: boolean
+  ocrApiCallCount?: number
+  ocrValidTextCount?: number
+  imageOcrSummary?: string
+  imageOcrTextPreview?: string
+  multimodalImageOcrTexts?: string[]
+  multimodalImageOcrMerged?: string
+  llmImageContentNarrative?: string
+}
+
 const unwrapPageResult = (resp: any): PayRiskAssessRecordPageResult => {
   if (resp?.list !== undefined && resp?.total !== undefined) {
     return resp
@@ -240,6 +257,13 @@ const unwrapPageResult = (resp: any): PayRiskAssessRecordPageResult => {
 
 export const assessPayRisk = async (data: PayRiskAssessReqVO) => {
   const resp = await axios.post(`${API_PREFIX}/pay/risk/assess`, data)
+  return resp?.data?.data ?? resp?.data ?? resp
+}
+
+export const analyzePayRiskImageOcr = async (
+  data: PayRiskImageOcrAnalyzeReqVO
+): Promise<PayRiskImageOcrAnalyzeRespVO> => {
+  const resp = await axios.post(`${API_PREFIX}/pay/risk/image-ocr-analyze`, data)
   return resp?.data?.data ?? resp?.data ?? resp
 }
 

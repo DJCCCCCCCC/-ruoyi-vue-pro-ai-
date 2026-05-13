@@ -5,6 +5,8 @@ import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
@@ -39,6 +41,11 @@ public interface PayRiskAssessService {
      * 驾驶舱穿透：指定今日新增风险词，返回关联评估工单及沟通过程汇总。
      */
     PayRiskTodayNewTermDetailRespVO getTodayNewRiskTermDetail(@Valid PayRiskTodayNewTermDetailReqVO reqVO);
+
+    /**
+     * 专项：仅对图片 data URL 做 OCR，并可选用 LLM 生成图中文字含义与风险解读（不跑完整支付风险评估）。
+     */
+    PayRiskImageOcrAnalyzeRespVO analyzeImageOcr(@Valid PayRiskImageOcrAnalyzeReqVO reqVO);
 
 }
 

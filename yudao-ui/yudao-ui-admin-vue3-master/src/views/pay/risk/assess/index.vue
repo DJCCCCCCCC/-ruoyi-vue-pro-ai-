@@ -59,6 +59,8 @@
       </el-form>
     </ContentWrap>
 
+    <ImageContentAnalysisPanel :payment-data="selectedPaymentObject" :record-id="selectedRecord?.id ?? null" />
+
     <section class="overview-grid">
       <ContentWrap class="panel metric-card">
         <span>风险评分</span>
@@ -353,6 +355,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, 
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
+import ImageContentAnalysisPanel from './components/ImageContentAnalysisPanel.vue'
 import LlmRiskReportPanel from './components/LlmRiskReportPanel.vue'
 import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
 import ThreatIntelPanel from './components/ThreatIntelPanel.vue'

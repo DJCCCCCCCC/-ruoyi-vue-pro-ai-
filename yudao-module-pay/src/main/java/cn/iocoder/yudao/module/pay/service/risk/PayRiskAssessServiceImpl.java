@@ -4,6 +4,8 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermRelatedTicketVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
@@ -81,6 +83,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     /** 二次 LLM 上下文中的 deepAnalysis 上限，控制 token 与耗时 */
     private static final int LLM_CONTEXT_DEEP_ANALYSIS_MAX_CHARS = 6000;
+
+    /** 图片 OCR 专项 LLM 解读：合并正文输入上限 */
+    private static final int IMAGE_OCR_LLM_INPUT_MAX_CHARS = 12000;
 
     @PreDestroy
     public void shutdownRiskAssessExecutor() {
@@ -1113,6 +1118,66 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    @Override
+    public PayRiskImageOcrAnalyzeRespVO analyzeImageOcr(@Valid PayRiskImageOcrAnalyzeReqVO reqVO) {
+        List<String> urls = reqVO.getImageDataUrls().stream()
+                .filter(StrUtil::isNotBlank)
+                .map(String::trim)
+                .limit(ocrMaxImagesPerRequest)
+                .collect(Collectors.toList());
+        if (urls.isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_IMAGE_ANALYZE_NO_VALID_DATA_URL);
+        }
+        com.fasterxml.jackson.databind.node.ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
+        com.fasterxml.jackson.databind.node.ArrayNode arr = JsonUtils.getObjectMapper().createArrayNode();
+        for (String u : urls) {
+            arr.add(u);
+        }
+        root.set("imageDataUrls", arr);
+        if (PayRiskPaymentImageOcrEnricher.countImageDataUrls(root) == 0) {
+            throw exception(ErrorCodeConstants.PAY_RISK_IMAGE_ANALYZE_NO_VALID_DATA_URL);
+        }
+        PayRiskImageOcrEnrichOutcome outcome = PayRiskPaymentImageOcrEnricher.enrichWithOutcome(
+                root, payRiskGiteeOcrClient, ocrMaxPayloadChars, ocrMaxImagesPerRequest, true);
+        PayRiskImageOcrAnalyzeRespVO resp = new PayRiskImageOcrAnalyzeRespVO();
+        resp.setEmbeddedImageCount(outcome.getEmbeddedImageCount());
+        resp.setOcrServiceEnabled(outcome.isOcrServiceEnabled());
+        resp.setOcrApiCallCount(outcome.getOcrApiCallCount());
+        resp.setOcrValidTextCount(outcome.getOcrValidTextCount());
+        resp.setImageOcrSummary(outcome.getImageOcrSummary());
+        resp.setImageOcrTextPreview(outcome.getImageOcrTextPreview());
+        JsonNode pd = outcome.getPaymentData();
+        List<String> texts = new ArrayList<>();
+        if (pd != null && pd.has("multimodalImageOcrTexts") && pd.get("multimodalImageOcrTexts").isArray()) {
+            for (JsonNode n : pd.get("multimodalImageOcrTexts")) {
+                texts.add(n.asText(""));
+            }
+        }
+        resp.setMultimodalImageOcrTexts(texts);
+        String merged = null;
+        if (pd != null && pd.has("multimodalImageOcrMerged")) {
+            JsonNode m = pd.get("multimodalImageOcrMerged");
+            if (m != null && m.isTextual()) {
+                String t = m.asText("");
+                merged = t.isEmpty() ? null : t;
+            }
+        }
+        resp.setMultimodalImageOcrMerged(merged);
+        boolean wantLlm = reqVO.getIncludeLlmInsight() == null || Boolean.TRUE.equals(reqVO.getIncludeLlmInsight());
+        if (wantLlm && StrUtil.isNotBlank(merged)) {
+            String snippet = merged.length() > IMAGE_OCR_LLM_INPUT_MAX_CHARS
+                    ? merged.substring(0, IMAGE_OCR_LLM_INPUT_MAX_CHARS) + "…（已截断，用于模型输入）"
+                    : merged;
+            try {
+                resp.setLlmImageContentNarrative(deepSeekClient.analyzeImageOcrNarrative(snippet));
+            } catch (Exception ex) {
+                log.warn("[analyzeImageOcr] LLM 解读失败，已跳过：{}", ex.getMessage());
+                resp.setLlmImageContentNarrative(null);
+            }
+        }
+        return resp;
     }
 
     private static class BehaviorAssessBundle {
