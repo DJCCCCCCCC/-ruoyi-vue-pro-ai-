@@ -9,11 +9,17 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+
 @Mapper
 public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessRecordDO> {
 
     default PageResult<PayRiskAssessRecordDO> selectPage(PayRiskAssessRecordPageReqVO reqVO) {
         return selectPage(reqVO, new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .eqIfPresent(PayRiskAssessRecordDO::getId, reqVO.getId())
                 .eqIfPresent(PayRiskAssessRecordDO::getRiskLevel, reqVO.getRiskLevel())
                 .likeIfPresent(PayRiskAssessRecordDO::getScene, reqVO.getScene())
                 .likeIfPresent(PayRiskAssessRecordDO::getSource, reqVO.getSource())
@@ -34,4 +40,34 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
      */
     @Delete("DELETE FROM pay_risk_assess_record")
     int deleteAllPhysically();
+
+    /**
+     * 仅扫描今日之前记录的命中因子，用于判断「今日新增」风险词
+     */
+    default List<PayRiskAssessRecordDO> selectRiskFactorsJsonBefore(LocalDateTime deadlineExclusive) {
+        return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .select(PayRiskAssessRecordDO::getRiskFactorsJson)
+                .lt(PayRiskAssessRecordDO::getCreateTime, deadlineExclusive));
+    }
+
+    /**
+     * 今日内的记录 id + 风险因子（轻量，用于「今日新增风险词」聚合）
+     */
+    default List<PayRiskAssessRecordDO> selectIdAndRiskFactorsBetween(LocalDateTime startInclusive,
+                                                                       LocalDateTime endExclusive) {
+        return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getRiskFactorsJson)
+                .ge(PayRiskAssessRecordDO::getCreateTime, startInclusive)
+                .lt(PayRiskAssessRecordDO::getCreateTime, endExclusive)
+                .orderByDesc(PayRiskAssessRecordDO::getId));
+    }
+
+    default List<PayRiskAssessRecordDO> selectByIds(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .in(PayRiskAssessRecordDO::getId, ids)
+                .orderByDesc(PayRiskAssessRecordDO::getId));
+    }
 }

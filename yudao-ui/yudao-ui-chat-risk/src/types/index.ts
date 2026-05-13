@@ -137,6 +137,21 @@ export interface PayRiskAssessRespVO {
   topologyInfo?: PayRiskRelationTopology
   llmReport?: PayRiskLlmReport
   advancedAnalysis?: PayRiskAdvancedAnalysis
+  /** 内嵌图片数量；无图时通常不传 */
+  embeddedImageCount?: number
+  imageOcrServiceEnabled?: boolean
+  imageOcrApiCallCount?: number
+  imageOcrValidTextCount?: number
+  /** 图片 OCR 处理说明（中文） */
+  imageOcrSummary?: string
+  /** OCR 正文预览（截断） */
+  imageOcrTextPreview?: string
+}
+
+/** 单条聊天里的图片（压缩后为 JPEG data URL，供后端 OCR 扫描） */
+export interface ChatMessageImage {
+  mime: string
+  dataUrl: string
 }
 
 export interface ChatMessage {
@@ -145,4 +160,6 @@ export interface ChatMessage {
   content: string
   timestamp: Date
   senderName?: string
+  /** 与文字同气泡展示；提交分析时会写入 paymentData.messages[].imageDataUrls */
+  images?: ChatMessageImage[]
 }

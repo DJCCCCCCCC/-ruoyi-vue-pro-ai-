@@ -7,6 +7,9 @@ import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
@@ -88,6 +91,21 @@ public class AdminPayRiskAssessController {
     public CommonResult<Boolean> clearRecordsByPost() {
         payRiskAssessService.clearRiskAssessRecords();
         return success(true);
+    }
+
+    @GetMapping("/today-new-risk-terms")
+    @Operation(summary = "驾驶舱 - 今日新增风险词（相对历史记录首次出现的风险因子）")
+    @PermitAll
+    public CommonResult<PayRiskTodayNewTermsRespVO> getTodayNewRiskTerms() {
+        return success(payRiskAssessService.getTodayNewRiskTerms());
+    }
+
+    @PostMapping("/today-new-risk-term-detail")
+    @Operation(summary = "驾驶舱 - 今日新增风险词穿透（关联评估工单与沟通过程汇总）")
+    @PermitAll
+    public CommonResult<PayRiskTodayNewTermDetailRespVO> getTodayNewRiskTermDetail(
+            @Valid @RequestBody PayRiskTodayNewTermDetailReqVO reqVO) {
+        return success(payRiskAssessService.getTodayNewRiskTermDetail(reqVO));
     }
 
     @PostMapping("/review")

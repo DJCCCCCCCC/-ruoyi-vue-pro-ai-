@@ -1,7 +1,8 @@
 <template>
   <div class="chat-input">
     <div class="toolbar">
-      <div class="sender-switch">
+      <div class="toolbar-left">
+        <div class="sender-switch">
         <button
           type="button"
           :class="['sender-btn', { active: sender === 'peer' }]"
@@ -19,6 +20,25 @@
           我发言
         </button>
       </div>
+      <input
+        ref="fileInputRef"
+        type="file"
+        class="sr-only"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        multiple
+        :disabled="disabled"
+        @change="onImageFiles"
+      />
+      <button
+        type="button"
+        class="ghost-btn ghost-btn-icon"
+        title="上传图片（将随聊天一并提交后台，服务端可先 OCR 再分析）"
+        :disabled="disabled"
+        @click="openFilePicker"
+      >
+        图片
+      </button>
+      </div>
       <button type="button" class="ghost-btn" @click="emit('reset')" :disabled="disabled">
         载入推荐样例
       </button>
@@ -34,7 +54,7 @@
       ></textarea>
     </label>
     <div class="input-footer">
-      <span class="char-count">Enter 发消息，检测到链接/二维码等高风险信号会自动提交后台</span>
+      <span class="char-count">Enter 发消息；可上传图片（对方发图会触发自动提交）；含链接/转账催促等也会自动提交后台</span>
       <div class="action-group">
         <button
           type="button"
@@ -59,6 +79,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { ChatRole } from '@/types'
 import LoadingDots from './LoadingDots.vue'
 
@@ -75,10 +96,27 @@ interface Emits {
   (e: 'send', value: string): void
   (e: 'analyze'): void
   (e: 'reset'): void
+  (e: 'pickImages', files: File[]): void
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+const fileInputRef = ref<HTMLInputElement | null>(null)
+
+const openFilePicker = () => {
+  if (props.disabled) return
+  fileInputRef.value?.click()
+}
+
+const onImageFiles = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = input.files ? Array.from(input.files) : []
+  input.value = ''
+  if (!files.length || props.disabled) {
+    return
+  }
+  emit('pickImages', files)
+}
 
 const handleInput = (event: Event) => {
   emit('update:modelValue', (event.target as HTMLTextAreaElement).value)
@@ -118,6 +156,29 @@ const handleSend = () => {
 
 .toolbar {
   margin-bottom: 10px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ghost-btn-icon {
+  flex-shrink: 0;
 }
 
 .char-count {

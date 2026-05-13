@@ -4,6 +4,11 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermRelatedTicketVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermItemVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
@@ -11,10 +16,12 @@ import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
+import cn.iocoder.yudao.module.pay.service.risk.client.PayRiskGiteeOcrClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskImageOcrEnrichOutcome;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
@@ -23,6 +30,7 @@ import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGene
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPaymentImageOcrEnricher;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
 import cn.hutool.core.util.StrUtil;
@@ -31,14 +39,20 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +61,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 
@@ -79,6 +94,18 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     private DeepSeekClient deepSeekClient;
 
     @Resource
+    private PayRiskGiteeOcrClient payRiskGiteeOcrClient;
+
+    @Value("${yudao.pay.risk-assess.ocr.max-payload-chars:15000000}")
+    private long ocrMaxPayloadChars;
+
+    @Value("${yudao.pay.risk-assess.ocr.max-images-per-request:5}")
+    private int ocrMaxImagesPerRequest;
+
+    @Value("${yudao.pay.risk-assess.ocr.strip-image-data-after-ocr:true}")
+    private boolean ocrStripImageDataAfterOcr;
+
+    @Resource
     private WhoisXmlApiClient whoisXmlApiClient;
 
     @Resource
@@ -89,7 +116,13 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Override
     public AppPayRiskAssessRespVO assess(@Valid AppPayRiskAssessReqVO reqVO) {
-        JsonNode paymentData = reqVO.getPaymentData();
+        PayRiskImageOcrEnrichOutcome ocrOutcome = PayRiskPaymentImageOcrEnricher.enrichWithOutcome(
+                reqVO.getPaymentData(),
+                payRiskGiteeOcrClient,
+                ocrMaxPayloadChars,
+                ocrMaxImagesPerRequest,
+                ocrStripImageDataAfterOcr);
+        JsonNode paymentData = ocrOutcome.getPaymentData();
 
         String ip = reqVO.getIp();
         if (ip == null || ip.trim().isEmpty()) {
@@ -164,6 +197,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setRiskLevel(mergedResp.getRiskLevel());
         respVO.setDeepAnalysis(mergedResp.getDeepAnalysis());
         respVO.setRiskFactors(mergedResp.getRiskFactors());
+        applyImageOcrToResponse(respVO, ocrOutcome);
         respVO.setCaseSimilarityBonus(caseSimilarityResult.getBonusScore());
         respVO.setIpInfo(ipInfoMaskedJsonNode);
         respVO.setBehaviorInfo(buildBehaviorInfo(behaviorAssessBundle));
@@ -228,6 +262,12 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("caseSimilarityBonus", respVO.getCaseSimilarityBonus());
         result.put("caseSimilarityMatches", respVO.getAdvancedAnalysis() == null ? null : respVO.getAdvancedAnalysis().getCaseMatches());
         result.put("decision", respVO.getDecision());
+        result.put("embeddedImageCount", respVO.getEmbeddedImageCount());
+        result.put("imageOcrServiceEnabled", respVO.getImageOcrServiceEnabled());
+        result.put("imageOcrApiCallCount", respVO.getImageOcrApiCallCount());
+        result.put("imageOcrValidTextCount", respVO.getImageOcrValidTextCount());
+        result.put("imageOcrSummary", respVO.getImageOcrSummary());
+        result.put("imageOcrTextPreview", respVO.getImageOcrTextPreview());
 
         log.info("[assessAndReturnMap] 返回 Map，whoisInfo = {}", result.get("whoisInfo"));
 
@@ -283,6 +323,40 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         }
         record.setReviewer(reviewer);
         payRiskAssessRecordMapper.updateById(record);
+    }
+
+    /**
+     * 将图片 OCR 统计与说明写入响应：独立字段 + deepAnalysis 前置说明 + 命中因子补充。
+     */
+    private void applyImageOcrToResponse(AppPayRiskAssessRespVO respVO, PayRiskImageOcrEnrichOutcome ocrOutcome) {
+        if (ocrOutcome == null || ocrOutcome.getEmbeddedImageCount() <= 0) {
+            return;
+        }
+        respVO.setEmbeddedImageCount(ocrOutcome.getEmbeddedImageCount());
+        respVO.setImageOcrServiceEnabled(ocrOutcome.isOcrServiceEnabled());
+        respVO.setImageOcrApiCallCount(ocrOutcome.getOcrApiCallCount());
+        respVO.setImageOcrValidTextCount(ocrOutcome.getOcrValidTextCount());
+        respVO.setImageOcrSummary(ocrOutcome.getImageOcrSummary());
+        respVO.setImageOcrTextPreview(ocrOutcome.getImageOcrTextPreview());
+
+        if (StrUtil.isNotBlank(ocrOutcome.getImageOcrSummary())) {
+            String body = StrUtil.nullToDefault(respVO.getDeepAnalysis(), "").trim();
+            respVO.setDeepAnalysis(ocrOutcome.getImageOcrSummary() + (body.isEmpty() ? "" : "\n\n" + body));
+        }
+
+        LinkedHashSet<String> factors = new LinkedHashSet<>();
+        if (respVO.getRiskFactors() != null) {
+            factors.addAll(respVO.getRiskFactors());
+        }
+        if (ocrOutcome.isOcrServiceEnabled() && ocrOutcome.getOcrValidTextCount() > 0) {
+            factors.add("图片 OCR：已识别 " + ocrOutcome.getOcrValidTextCount()
+                    + " 段文字并参与研判（见 imageOcrSummary / imageOcrTextPreview）");
+        } else if (ocrOutcome.isOcrServiceEnabled()) {
+            factors.add("图片 OCR：已调用但未得到有效文字");
+        } else {
+            factors.add("检测到内嵌图片，服务端 OCR 未开启，未对图中文字做专项识别");
+        }
+        respVO.setRiskFactors(new ArrayList<>(factors));
     }
 
     private BehaviorAssessBundle assessBehaviorRisk(JsonNode paymentData) {
@@ -893,6 +967,152 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             }
         }
         return null;
+    }
+
+    private static final int MAX_RISK_TERM_LEN = 256;
+    private static final int MAX_CONV_MSG_LINES = 50;
+    private static final int MAX_MSG_CONTENT_LEN = 240;
+
+    @Override
+    public PayRiskTodayNewTermsRespVO getTodayNewRiskTerms() {
+        LocalDateTime[] range = resolveLocalTodayRange();
+        Map<String, LinkedHashSet<Long>> termToIds = computeTodayNewTermToRecordIds(range[0], range[1]);
+        PayRiskTodayNewTermsRespVO resp = new PayRiskTodayNewTermsRespVO();
+        List<PayRiskTodayNewTermItemVO> items = termToIds.entrySet().stream().map(e -> {
+            PayRiskTodayNewTermItemVO vo = new PayRiskTodayNewTermItemVO();
+            vo.setTerm(e.getKey());
+            vo.setTodayHitCount(e.getValue().size());
+            vo.setRelatedRecordIds(new ArrayList<>(e.getValue()));
+            return vo;
+        }).sorted(Comparator.comparing(PayRiskTodayNewTermItemVO::getTodayHitCount).reversed()
+                .thenComparing(PayRiskTodayNewTermItemVO::getTerm, Comparator.nullsLast(String::compareTo)))
+                .collect(Collectors.toList());
+        resp.setTerms(items);
+        return resp;
+    }
+
+    @Override
+    public PayRiskTodayNewTermDetailRespVO getTodayNewRiskTermDetail(PayRiskTodayNewTermDetailReqVO reqVO) {
+        String term = normalizeRiskTermInput(reqVO.getTerm());
+        if (StrUtil.isEmpty(term) || term.length() > MAX_RISK_TERM_LEN) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_PARAM_INVALID);
+        }
+        LocalDateTime[] range = resolveLocalTodayRange();
+        Map<String, LinkedHashSet<Long>> termToIds = computeTodayNewTermToRecordIds(range[0], range[1]);
+        LinkedHashSet<Long> matchedIds = termToIds.get(term);
+        if (matchedIds == null || matchedIds.isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW);
+        }
+        List<PayRiskAssessRecordDO> records = payRiskAssessRecordMapper.selectByIds(matchedIds);
+        List<PayRiskTermRelatedTicketVO> tickets = new ArrayList<>();
+        for (PayRiskAssessRecordDO record : records) {
+            PayRiskTermRelatedTicketVO t = new PayRiskTermRelatedTicketVO();
+            t.setId(record.getId());
+            t.setScene(record.getScene());
+            t.setSource(record.getSource());
+            t.setCreateTime(record.getCreateTime());
+            t.setRiskLevel(record.getRiskLevel());
+            t.setReviewStatus(record.getReviewStatus());
+            t.setDecisionAction(record.getDecisionAction());
+            t.setConversationSummary(buildConversationSummaryForPaymentData(record.getPaymentDataJson()));
+            tickets.add(t);
+        }
+        PayRiskTodayNewTermDetailRespVO resp = new PayRiskTodayNewTermDetailRespVO();
+        resp.setTerm(term);
+        resp.setTickets(tickets);
+        return resp;
+    }
+
+    private LocalDateTime[] resolveLocalTodayRange() {
+        LocalDateTime dayStart = LocalDate.now().atStartOfDay();
+        return new LocalDateTime[]{dayStart, dayStart.plusDays(1)};
+    }
+
+    private Map<String, LinkedHashSet<Long>> computeTodayNewTermToRecordIds(LocalDateTime dayStartInclusive,
+                                                                            LocalDateTime dayEndExclusive) {
+        Set<String> historical = new HashSet<>();
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectRiskFactorsJsonBefore(dayStartInclusive)) {
+            historical.addAll(parseRiskFactorStrings(row.getRiskFactorsJson()));
+        }
+        Map<String, LinkedHashSet<Long>> termToIds = new LinkedHashMap<>();
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectIdAndRiskFactorsBetween(dayStartInclusive, dayEndExclusive)) {
+            Long id = row.getId();
+            if (id == null) {
+                continue;
+            }
+            for (String factor : parseRiskFactorStrings(row.getRiskFactorsJson())) {
+                if (!historical.contains(factor)) {
+                    termToIds.computeIfAbsent(factor, k -> new LinkedHashSet<>()).add(id);
+                }
+            }
+        }
+        return termToIds;
+    }
+
+    private static String normalizeRiskTermInput(String raw) {
+        return raw == null ? "" : raw.trim();
+    }
+
+    private static List<String> parseRiskFactorStrings(String json) {
+        if (StrUtil.isBlank(json)) {
+            return Collections.emptyList();
+        }
+        try {
+            List<String> arr = JsonUtils.parseArray(json, String.class);
+            if (arr == null || arr.isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<String> out = new ArrayList<>();
+            for (String s : arr) {
+                if (s == null) {
+                    continue;
+                }
+                String t = s.trim();
+                if (t.isEmpty() || t.length() > MAX_RISK_TERM_LEN) {
+                    continue;
+                }
+                out.add(t);
+            }
+            return out;
+        } catch (Exception ex) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static String buildConversationSummaryForPaymentData(String paymentDataJson) {
+        if (StrUtil.isBlank(paymentDataJson)) {
+            return "";
+        }
+        try {
+            JsonNode root = JsonUtils.parseTree(paymentDataJson);
+            JsonNode messages = root.path("messages");
+            StringBuilder sb = new StringBuilder();
+            if (messages.isArray() && messages.size() > 0) {
+                int n = 0;
+                for (JsonNode m : messages) {
+                    if (n++ >= MAX_CONV_MSG_LINES) {
+                        sb.append("…（对话较长，已截断展示）");
+                        break;
+                    }
+                    String name = m.path("senderName").asText("");
+                    String role = m.path("role").asText("");
+                    String sender = StrUtil.blankToDefault(name, role);
+                    String content = m.path("content").asText("");
+                    if (content.length() > MAX_MSG_CONTENT_LEN) {
+                        content = content.substring(0, MAX_MSG_CONTENT_LEN) + "…";
+                    }
+                    sb.append("【").append(sender).append("】").append(content).append('\n');
+                }
+                return sb.toString().trim();
+            }
+            String latest = root.path("latestPeerMessage").asText("");
+            if (StrUtil.isNotBlank(latest)) {
+                return "（无结构化对话，仅最新对方摘要）\n【对方】" + latest;
+            }
+            return "";
+        } catch (Exception ex) {
+            return "";
+        }
     }
 
     private static class BehaviorAssessBundle {

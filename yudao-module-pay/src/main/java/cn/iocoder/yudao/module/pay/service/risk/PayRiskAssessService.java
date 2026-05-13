@@ -5,6 +5,9 @@ import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
 
 import javax.validation.Valid;
@@ -26,6 +29,16 @@ public interface PayRiskAssessService {
      * 人工复核闭环：对「待复核」记录提交放行/拦截/误报结案。
      */
     void reviewRiskAssessRecord(@Valid PayRiskAssessReviewReqVO reqVO);
+
+    /**
+     * 驾驶舱：今日在历史中首次出现的风险因子文案（基于 riskFactorsJson 与昨日及以前对比）。
+     */
+    PayRiskTodayNewTermsRespVO getTodayNewRiskTerms();
+
+    /**
+     * 驾驶舱穿透：指定今日新增风险词，返回关联评估工单及沟通过程汇总。
+     */
+    PayRiskTodayNewTermDetailRespVO getTodayNewRiskTermDetail(@Valid PayRiskTodayNewTermDetailReqVO reqVO);
 
 }
 

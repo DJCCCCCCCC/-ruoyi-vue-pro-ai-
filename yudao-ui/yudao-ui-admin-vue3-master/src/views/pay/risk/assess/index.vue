@@ -127,6 +127,31 @@
         </div>
         <div ref="interceptTrendRef" class="chart-canvas"></div>
       </ContentWrap>
+
+      <ContentWrap class="panel chart-card new-terms-panel">
+        <div class="panel-head new-terms-head">
+          <div>
+            <h3>今日新增风险词</h3>
+            <p>相对历史评估记录首次出现的命中因子；点击可穿透至关联评估工单与沟通过程汇总</p>
+          </div>
+          <el-button type="primary" link :loading="newTermsLoading" @click="loadTodayNewTerms">刷新</el-button>
+        </div>
+        <div v-loading="newTermsLoading" class="new-terms-body">
+          <el-empty v-if="!newTermsLoading && newTermsList.length === 0" description="今日暂无新增风险词" />
+          <div v-else class="new-terms-chips">
+            <button
+              v-for="item in newTermsList"
+              :key="item.term"
+              type="button"
+              class="new-term-chip"
+              @click="openTodayNewTermDetail(item.term)"
+            >
+              <span class="new-term-text">{{ item.term }}</span>
+              <span class="new-term-count">{{ item.todayHitCount }} 单</span>
+            </button>
+          </div>
+        </div>
+      </ContentWrap>
     </section>
 
     <section v-if="selectedResult" class="detail-stack">
@@ -176,7 +201,7 @@
       </ContentWrap>
     </section>
 
-    <ContentWrap class="panel table-panel">
+    <ContentWrap ref="recordTablePanelRef" class="panel table-panel">
       <div class="panel-head table-head">
         <div>
           <h3>分析记录</h3>
@@ -280,6 +305,44 @@
         <el-button type="primary" :loading="reviewSubmitting" @click="submitReview">提交</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="newTermDrawerVisible"
+      :title="newTermDrawerTitle"
+      direction="rtl"
+      size="92%"
+      class="new-term-drawer-root"
+      destroy-on-close
+    >
+      <div v-loading="newTermDetailLoading" class="new-term-drawer">
+        <el-empty v-if="!newTermDetailLoading && newTermTickets.length === 0" description="暂无穿透数据" />
+        <div v-for="t in newTermTickets" :key="t.id" class="ticket-block">
+          <div class="ticket-head">
+            <div class="ticket-meta">
+              <strong>评估工单 #{{ t.id }}</strong>
+              <span class="ticket-sub">{{ t.scene || '—' }} · {{ t.source || '—' }}</span>
+            </div>
+            <div class="ticket-tags">
+              <el-tag size="small" :type="riskTagType(t.riskLevel)">{{ t.riskLevel || '—' }}</el-tag>
+              <el-tag v-if="t.decisionAction" size="small" effect="plain" :type="decisionTagType(t.decisionAction)">
+                {{ t.decisionAction }}
+              </el-tag>
+              <el-tag v-if="t.reviewStatus" size="small" type="info" effect="plain">
+                {{ reviewStatusLabel(t.reviewStatus) }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="ticket-actions">
+            <el-button type="primary" link @click="openRecordFromTicket(t.id)">打开完整评估详情</el-button>
+            <span v-if="t.createTime" class="ticket-time">{{ t.createTime }}</span>
+          </div>
+          <div class="conv-block">
+            <div class="conv-label">沟通过程汇总</div>
+            <pre class="conv-summary">{{ t.conversationSummary || '（无结构化对话摘要）' }}</pre>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -298,9 +361,12 @@ import {
   clearPayRiskAssessRecords,
   deletePayRiskAssessRecord,
   getPayRiskAssessRecordPage,
+  getPayRiskTodayNewTermDetail,
+  getPayRiskTodayNewTerms,
   reviewPayRiskAssessRecord,
   type PayRiskAssessRecordVO,
-  type PayRiskAssessRespVO
+  type PayRiskAssessRespVO,
+  type PayRiskTermRelatedTicket
 } from '@/api/pay/risk/assess'
 
 defineOptions({ name: 'PayRiskAssess' })
@@ -359,6 +425,14 @@ const reviewForm = reactive({
   reviewAction: 'PASS' as 'PASS' | 'BLOCK' | 'DISMISS',
   remark: ''
 })
+
+const newTermsLoading = ref(false)
+const newTermsList = ref<Array<{ term: string; todayHitCount: number; relatedRecordIds: number[] }>>([])
+const newTermDrawerVisible = ref(false)
+const newTermDrawerTitle = ref('今日新增风险词')
+const newTermDetailLoading = ref(false)
+const newTermTickets = ref<PayRiskTermRelatedTicket[]>([])
+const recordTablePanelRef = ref<{ $el?: HTMLElement } | null>(null)
 
 const assessSubmitting = ref(false)
 const assessIp = ref('8.8.8.8')
@@ -764,6 +838,7 @@ const getRecordList = async () => {
     await enrichRecordIpGeo()
     await nextTick()
     renderDashboardCharts()
+    await loadTodayNewTerms()
   } catch (error: any) {
     recordList.value = []
     recordTotal.value = 0
@@ -776,6 +851,55 @@ const getRecordList = async () => {
 const refreshRecordList = async () => {
   recordQuery.pageNo = 1
   await getRecordList()
+}
+
+const loadTodayNewTerms = async () => {
+  newTermsLoading.value = true
+  try {
+    const res = await getPayRiskTodayNewTerms()
+    newTermsList.value = res.terms || []
+  } catch (e: unknown) {
+    newTermsList.value = []
+    message.error(e instanceof Error ? e.message : '加载今日新增风险词失败')
+  } finally {
+    newTermsLoading.value = false
+  }
+}
+
+const openTodayNewTermDetail = async (term: string) => {
+  newTermDrawerTitle.value = `今日新增风险词：${term}`
+  newTermDrawerVisible.value = true
+  newTermDetailLoading.value = true
+  newTermTickets.value = []
+  try {
+    const res = await getPayRiskTodayNewTermDetail(term)
+    newTermTickets.value = res.tickets || []
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : '加载穿透详情失败')
+    newTermDrawerVisible.value = false
+  } finally {
+    newTermDetailLoading.value = false
+  }
+}
+
+const openRecordFromTicket = async (id: number) => {
+  try {
+    const data = await getPayRiskAssessRecordPage({ pageNo: 1, pageSize: 1, id })
+    const page = unwrapRecordPage(data)
+    if (page.list?.length) {
+      selectedRecord.value = page.list[0]
+      newTermDrawerVisible.value = false
+      message.success(`已加载评估工单 #${id}`)
+      await nextTick()
+      const wrap = recordTablePanelRef.value
+      const el = wrap?.$el ?? wrap
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    } else {
+      message.warning('未找到该工单记录')
+    }
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : '加载工单失败')
+  }
 }
 
 const handleInvokeAssess = async () => {
@@ -1193,6 +1317,138 @@ onBeforeUnmount(() => {
 
 .trend-panel .chart-canvas {
   height: 380px;
+}
+
+.new-terms-panel {
+  grid-column: 1 / -1;
+}
+
+.new-terms-head {
+  align-items: center;
+}
+
+.new-terms-body {
+  min-height: 64px;
+}
+
+.new-terms-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.new-term-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(79, 135, 255, 0.45);
+  background: linear-gradient(180deg, #ffffff, #f0f6ff);
+  color: #24486f;
+  font-size: 13px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.12s ease;
+}
+
+.new-term-chip:hover {
+  box-shadow: 0 4px 14px rgba(79, 135, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.new-term-text {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.new-term-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f87ff;
+}
+
+.new-term-drawer {
+  padding-bottom: 20px;
+}
+
+.ticket-block {
+  border: 1px solid rgba(140, 183, 232, 0.45);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(180deg, #fbfdff, #f2f7ff);
+}
+
+.ticket-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.ticket-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ticket-meta strong {
+  color: #1f446b;
+  font-size: 15px;
+}
+
+.ticket-sub {
+  font-size: 12px;
+  color: #6f8cab;
+}
+
+.ticket-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ticket-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.ticket-time {
+  font-size: 12px;
+  color: #6f8cab;
+}
+
+.conv-block {
+  border-top: 1px dashed rgba(140, 183, 232, 0.5);
+  padding-top: 10px;
+}
+
+.conv-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #375d86;
+  margin-bottom: 6px;
+}
+
+.conv-summary {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #1f446b;
+  border: 1px solid rgba(140, 183, 232, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  white-space: pre-wrap;
+  max-height: 280px;
+  overflow: auto;
 }
 
 .detail-stack {

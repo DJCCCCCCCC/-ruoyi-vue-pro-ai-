@@ -104,5 +104,7 @@ public interface ErrorCodeConstants {
     ErrorCode PAY_RISK_ASSESS_RECORD_NOT_FOUND = new ErrorCode(1_007_010_006, "支付风险评估记录不存在");
     ErrorCode PAY_RISK_ASSESS_REVIEW_STATUS_INVALID = new ErrorCode(1_007_010_007, "当前记录不在待复核状态，无法提交复核结果");
     ErrorCode PAY_RISK_ASSESS_REVIEW_ACTION_INVALID = new ErrorCode(1_007_010_008, "复核动作不合法，应为 PASS / BLOCK / DISMISS");
+    ErrorCode PAY_RISK_ASSESS_TERM_PARAM_INVALID = new ErrorCode(1_007_010_009, "风险词参数不合法");
+    ErrorCode PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW = new ErrorCode(1_007_010_010, "该风险词不在今日新增列表中，无法查看穿透详情");
 
 }

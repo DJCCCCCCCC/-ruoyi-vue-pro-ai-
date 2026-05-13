@@ -10,6 +10,12 @@
 
     <p class="one-liner">{{ headline }}</p>
 
+    <div v-if="imageOcrBlock" class="block image-ocr-block">
+      <span class="block-label">图片与 OCR</span>
+      <p class="image-ocr-summary">{{ imageOcrBlock.summary }}</p>
+      <pre v-if="imageOcrBlock.preview" class="image-ocr-preview">{{ imageOcrBlock.preview }}</pre>
+    </div>
+
     <p v-if="scamPlain" class="scam-plain">{{ scamPlain }}</p>
 
     <div v-if="keyPoints.length" class="block">
@@ -50,6 +56,19 @@ const normalizedScore = computed(() =>
 const levelKey = computed(() => props.riskData.riskLevel.toLowerCase())
 
 const levelLabel = computed(() => levelLabels[props.riskData.riskLevel] || props.riskData.riskLevel)
+
+const imageOcrBlock = computed(() => {
+  const n = props.riskData.embeddedImageCount
+  if (n == null || n <= 0) {
+    return null
+  }
+  const summary = props.riskData.imageOcrSummary?.trim()
+  const preview = props.riskData.imageOcrTextPreview?.trim()
+  if (!summary && !preview) {
+    return null
+  }
+  return { summary: summary || '已检测到聊天中的图片。', preview: preview || '' }
+})
 
 const headline = computed(() => {
   const llm = props.riskData.llmReport
@@ -202,5 +221,34 @@ function truncate(s: string, max: number) {
 
 .compact-list.tips li {
   color: #0f766e;
+}
+
+.image-ocr-block {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.image-ocr-summary {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1e3a5f;
+  white-space: pre-wrap;
+}
+
+.image-ocr-preview {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #334155;
+  white-space: pre-wrap;
 }
 </style>

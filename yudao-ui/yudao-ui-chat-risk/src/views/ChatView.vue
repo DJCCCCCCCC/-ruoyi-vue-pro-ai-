@@ -57,7 +57,7 @@
         <section v-if="chatStore.messages.length === 0" class="welcome-card">
           <h3>这里不是和风控助手对话，而是模拟你和对方的正常聊天。</h3>
           <p>
-            对方可以发付款链接、退款通知、催促转账等内容；分析结果会提交到后台风控接口。上方「本人情况」为选填，填写后模型会用更贴合你年龄与性格的方式说明对方为何可疑、该怎么防。
+            对方可以发付款链接、退款通知、催促转账等；也可点下方「图片」上传截图（后台可先 OCR 再进风控模型）。分析会提交到后台。上方「本人情况」选填，填写后防诈说明会更贴合你的情况。
           </p>
           <div class="welcome-actions">
             <button
@@ -90,11 +90,12 @@
       <ChatInput
         v-model="draft"
         v-model:sender="draftSender"
-        :analyze-disabled="chatStore.messages.length === 0"
+        :analyze-disabled="getConversationMessages().length === 0"
         :disabled="chatStore.isLoading"
         @send="handleSend"
         @analyze="handleAnalyze"
         @reset="restoreDefaultPreset"
+        @pick-images="handlePickImages"
       />
     </section>
 
@@ -142,7 +143,8 @@ import RiskResultCompact from '@/components/RiskResultCompact.vue'
 import { useRiskAssess } from '@/composables/useRiskAssess'
 import { riskPresets, type RiskPreset } from '@/constants/presets'
 import { useChatStore } from '@/stores/chat'
-import type { ChatMessage, ChatRole, PayRiskAssessRespVO, RiskLevel } from '@/types'
+import type { ChatMessage, ChatMessageImage, ChatRole, PayRiskAssessRespVO, RiskLevel } from '@/types'
+import { fileToJpegDataUrl } from '@/utils/imageCompress'
 
 const chatStore = useChatStore()
 const { assess, error } = useRiskAssess()
@@ -175,14 +177,21 @@ const apiHost = computed(() => {
 const createMessage = (
   type: ChatMessage['type'],
   content: string,
-  senderName?: string
-): ChatMessage => ({
-  id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-  type,
-  content,
-  timestamp: new Date(),
-  senderName
-})
+  senderName?: string,
+  images?: ChatMessageImage[]
+): ChatMessage => {
+  const msg: ChatMessage = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    type,
+    content,
+    timestamp: new Date(),
+    senderName
+  }
+  if (images?.length) {
+    msg.images = images
+  }
+  return msg
+}
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -293,6 +302,44 @@ const handleSend = (text: string) => {
   }
 }
 
+const handlePickImages = async (files: File[]) => {
+  if (chatStore.isLoading || files.length === 0) {
+    return
+  }
+  const maxFiles = 5
+  const images: ChatMessageImage[] = []
+  try {
+    for (const file of files.slice(0, maxFiles)) {
+      if (!file.type.startsWith('image/')) {
+        continue
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        chatStore.addMessage(createMessage('system', `已跳过大文件：${file.name}（请小于约 25MB）`))
+        continue
+      }
+      const dataUrl = await fileToJpegDataUrl(file)
+      images.push({ mime: 'image/jpeg', dataUrl })
+    }
+  } catch {
+    chatStore.addMessage(createMessage('system', '图片处理失败，请换一张较小的 JPG/PNG 重试'))
+    return
+  }
+  if (!images.length) {
+    return
+  }
+  const caption = draft.value.trim()
+  draft.value = ''
+  const label = draftSender.value === 'peer' ? '对方' : '我'
+  const text =
+    caption ||
+    (images.length > 1 ? `[${images.length} 张图片]` : '[图片]')
+  chatStore.addMessage(createMessage(draftSender.value, text, label, images))
+
+  if (draftSender.value === 'peer') {
+    void maybeAutoAnalyze('检测到对方发送图片，已自动提交后台分析')
+  }
+}
+
 const extractLinks = (messages: ChatMessage[]) => {
   const urlPattern = /https?:\/\/[^\s]+/g
   return messages.flatMap((message) => message.content.match(urlPattern) || [])
@@ -321,7 +368,13 @@ const riskSignalPatterns = [
 const getRiskSignals = (messages: ChatMessage[]) => {
   const peerMessages = messages.filter((message) => message.type === 'peer')
   const content = peerMessages.map((message) => message.content).join('\n')
-  return riskSignalPatterns.filter((item) => item.pattern.test(content)).map((item) => item.label)
+  const labels: string[] = riskSignalPatterns
+    .filter((item) => item.pattern.test(content))
+    .map((item) => item.label)
+  if (peerMessages.some((m) => m.images?.length)) {
+    labels.push('图片')
+  }
+  return labels
 }
 
 const extractAmountFromMessages = (messages: ChatMessage[]) => {
@@ -360,6 +413,14 @@ const buildAnalysisPayload = () => {
   const conversationMessages = getConversationMessages()
   const links = extractLinks(conversationMessages)
   const latestPeerMessage = [...conversationMessages].reverse().find((message) => message.type === 'peer')
+  let latestPeerText = (latestPeerMessage?.content || '').trim()
+  if (latestPeerMessage?.images?.length) {
+    if (!latestPeerText) {
+      latestPeerText = `[对方发送了 ${latestPeerMessage.images.length} 张图片]`
+    } else {
+      latestPeerText = `${latestPeerText} [含 ${latestPeerMessage.images.length} 张图片]`
+    }
+  }
   const detectedSignals = getRiskSignals(conversationMessages)
   const detectedIp = extractFirstIp(conversationMessages)
   const detectedAmount = extractAmountFromMessages(conversationMessages)
@@ -375,14 +436,20 @@ const buildAnalysisPayload = () => {
     links,
     amount: detectedAmount,
     detectedSignals,
-    latestPeerMessage: latestPeerMessage?.content || '',
+    latestPeerMessage: latestPeerText,
     transactions,
-    messages: conversationMessages.map((message) => ({
-      role: message.type,
-      senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),
-      content: message.content,
-      timestamp: message.timestamp.toISOString()
-    }))
+    messages: conversationMessages.map((message) => {
+      const row: Record<string, unknown> = {
+        role: message.type,
+        senderName: message.senderName || (message.type === 'peer' ? '对方' : '我'),
+        content: message.content,
+        timestamp: message.timestamp.toISOString()
+      }
+      if (message.images?.length) {
+        row.imageDataUrls = message.images.map((img) => img.dataUrl)
+      }
+      return row
+    })
   }
 
   const profile: Record<string, string> = {}
@@ -410,6 +477,7 @@ const buildFingerprint = () =>
     getConversationMessages().map((message) => ({
       role: message.type,
       content: message.content,
+      imageSig: message.images?.map((im) => im.dataUrl?.length ?? 0).join(',') ?? '',
       time: message.timestamp.toISOString()
     }))
   )

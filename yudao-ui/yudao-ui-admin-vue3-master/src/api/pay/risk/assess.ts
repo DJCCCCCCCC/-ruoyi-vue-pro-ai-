@@ -33,6 +33,12 @@ export interface PayRiskAssessRespVO {
   advancedAnalysis?: PayRiskAdvancedAnalysis
   caseSimilarityBonus?: number
   decision?: PayRiskDecisionResult
+  embeddedImageCount?: number
+  imageOcrServiceEnabled?: boolean
+  imageOcrApiCallCount?: number
+  imageOcrValidTextCount?: number
+  imageOcrSummary?: string
+  imageOcrTextPreview?: string
 }
 
 export interface PayRiskLlmPersonaProfile {
@@ -178,12 +184,40 @@ export interface PayRiskAssessRecordVO {
 export interface PayRiskAssessRecordPageReqVO {
   pageNo: number
   pageSize: number
+  /** 精确按评估记录编号筛选（用于从风险词穿透等入口直达工单） */
+  id?: number
   riskLevel?: string
   scene?: string
   source?: string
   ip?: string
   reviewStatus?: string
   createTime?: [string, string]
+}
+
+export interface PayRiskTodayNewTermItem {
+  term: string
+  todayHitCount: number
+  relatedRecordIds: number[]
+}
+
+export interface PayRiskTodayNewTermsResult {
+  terms: PayRiskTodayNewTermItem[]
+}
+
+export interface PayRiskTermRelatedTicket {
+  id: number
+  scene?: string
+  source?: string
+  createTime?: string
+  riskLevel?: string
+  reviewStatus?: string
+  decisionAction?: string
+  conversationSummary?: string
+}
+
+export interface PayRiskTodayNewTermDetailResult {
+  term: string
+  tickets: PayRiskTermRelatedTicket[]
 }
 
 export interface PayRiskAssessRecordPageResult {
@@ -233,4 +267,21 @@ export interface PayRiskAssessReviewReqVO {
 export const reviewPayRiskAssessRecord = async (data: PayRiskAssessReviewReqVO) => {
   const resp = await axios.post(`${API_PREFIX}/pay/risk/review`, data)
   return resp?.data?.data ?? resp?.data ?? resp
+}
+
+export const getPayRiskTodayNewTerms = async (): Promise<PayRiskTodayNewTermsResult> => {
+  const resp = await axios.get(`${API_PREFIX}/pay/risk/today-new-risk-terms`)
+  const data = resp?.data?.data ?? resp?.data ?? resp
+  return { terms: data?.terms ?? [] }
+}
+
+export const getPayRiskTodayNewTermDetail = async (
+  term: string
+): Promise<PayRiskTodayNewTermDetailResult> => {
+  const resp = await axios.post(`${API_PREFIX}/pay/risk/today-new-risk-term-detail`, { term })
+  const data = resp?.data?.data ?? resp?.data ?? resp
+  return {
+    term: data?.term ?? term,
+    tickets: data?.tickets ?? []
+  }
 }

@@ -10,6 +10,16 @@
         <span class="time">{{ formatTime(message.timestamp) }}</span>
       </div>
       <div class="bubble">
+        <div v-if="message.images?.length" class="message-images">
+          <img
+            v-for="(img, idx) in message.images"
+            :key="idx"
+            class="thumb"
+            :src="img.dataUrl"
+            alt=""
+            loading="lazy"
+          />
+        </div>
         <div v-if="message.content" class="message-text">
           <pre v-if="message.type === 'self'">{{ message.content }}</pre>
           <p v-else>{{ message.content }}</p>
@@ -123,6 +133,26 @@ const formatTime = (date: Date) => dayjs(date).format('HH:mm')
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-images:last-child {
+  margin-bottom: 0;
+}
+
+.thumb {
+  max-width: min(220px, 72vw);
+  max-height: 220px;
+  border-radius: 12px;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
 }
 
 .message-text pre {

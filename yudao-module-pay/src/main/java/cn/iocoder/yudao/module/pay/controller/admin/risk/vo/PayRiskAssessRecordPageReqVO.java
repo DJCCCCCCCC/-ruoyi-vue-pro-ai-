@@ -17,6 +17,9 @@ import static cn.iocoder.yudao.framework.common.util.date.DateUtils.FORMAT_YEAR_
 @ToString(callSuper = true)
 public class PayRiskAssessRecordPageReqVO extends PageParam {
 
+    @Schema(description = "记录编号（精确筛选，用于从风险词等入口直达工单）", example = "1024")
+    private Long id;
+
     @Schema(description = "风险等级", example = "HIGH")
     private String riskLevel;
 
