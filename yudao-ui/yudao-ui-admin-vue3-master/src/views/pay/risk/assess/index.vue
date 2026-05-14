@@ -171,6 +171,7 @@
       </ContentWrap>
 
       <LlmRiskReportPanel :report="selectedResult?.llmReport" />
+      <AgentReflectionPanel :reflection="selectedResult?.agentReflection" />
       <ContentWrap v-if="selectedResult.caseSimilarityBonus" class="panel metric-inline">
         <span>历史案例加分</span>
         <strong>+{{ selectedResult.caseSimilarityBonus }}</strong>
@@ -355,6 +356,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, 
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
+import AgentReflectionPanel from './components/AgentReflectionPanel.vue'
 import ImageContentAnalysisPanel from './components/ImageContentAnalysisPanel.vue'
 import LlmRiskReportPanel from './components/LlmRiskReportPanel.vue'
 import PaymentTopologyPanel from './components/PaymentTopologyPanel.vue'
@@ -487,6 +489,7 @@ const selectedResult = computed<PayRiskAssessRespVO | null>(() => {
     topologyInfo: parseJsonText(record.topologyInfoJson, undefined),
     llmReport: parseJsonText(record.llmReportJson, undefined),
     advancedAnalysis,
+    agentReflection: parseJsonText(record.agentReflectionJson, undefined),
     caseSimilarityBonus: caseBonus,
     decision: parseJsonText(record.decisionJson, undefined)
   }

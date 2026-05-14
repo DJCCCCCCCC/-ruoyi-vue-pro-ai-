@@ -53,6 +53,9 @@ public class PayRiskAssessRecordRespVO {
     private String llmReportJson;
     private String advancedAnalysisJson;
 
+    @Schema(description = "Agentic 反思流 JSON 字符串")
+    private String agentReflectionJson;
+
     @Schema(description = "策略建议动作")
     private String decisionAction;
 

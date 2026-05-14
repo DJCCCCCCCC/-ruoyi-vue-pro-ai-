@@ -20,8 +20,9 @@ import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.PayRiskGiteeOcrClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
-import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAgentReflection;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskImageOcrEnrichOutcome;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
@@ -32,6 +33,7 @@ import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGene
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAgentReflectionPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPaymentImageOcrEnricher;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
@@ -240,6 +242,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         if (respVO.getAdvancedAnalysis() != null) {
             respVO.getAdvancedAnalysis().setCaseMatches(caseSimilarityResult.getMatches());
         }
+        respVO.setAgentReflection(buildAgentReflection(paymentMaskedJsonNode, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
+        applyAgentReflectionToResponse(respVO);
 
         PayRiskDecisionResult decision = payRiskDecisionEngine.decide(respVO.getRiskScore(), respVO.getRiskLevel(),
                 respVO.getCaseSimilarityBonus(), respVO.getLlmReport());
@@ -264,6 +268,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         result.put("topologyInfo", respVO.getTopologyInfo());
         result.put("llmReport", respVO.getLlmReport());
         result.put("advancedAnalysis", respVO.getAdvancedAnalysis());
+        result.put("agentReflection", respVO.getAgentReflection());
         result.put("caseSimilarityBonus", respVO.getCaseSimilarityBonus());
         result.put("caseSimilarityMatches", respVO.getAdvancedAnalysis() == null ? null : respVO.getAdvancedAnalysis().getCaseMatches());
         result.put("decision", respVO.getDecision());
@@ -657,6 +662,58 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return PayRiskAdvancedAnalysisBuilder.build(paymentData, ipInfoMaskedJsonNode, whoisInfoNode, respVO);
     }
 
+    private PayRiskAgentReflection buildAgentReflection(JsonNode paymentMaskedJsonNode,
+                                                        JsonNode ipInfoMaskedJsonNode,
+                                                        JsonNode whoisInfoNode,
+                                                        AppPayRiskAssessRespVO respVO) {
+        JsonNode contextNode = PayRiskAgentReflectionPromptBuilder.buildContext(paymentMaskedJsonNode,
+                ipInfoMaskedJsonNode, respVO.getRiskScore(), respVO.getRiskLevel(), respVO.getDeepAnalysis(),
+                respVO.getRiskFactors(), respVO.getBehaviorInfo(), respVO.getTopologyInfo(), whoisInfoNode,
+                respVO.getLlmReport(), respVO.getAdvancedAnalysis());
+        String contextJson = JsonUtils.toJsonString(contextNode);
+        try {
+            PayRiskAgentReflection reflection = new PayRiskAgentReflection();
+            reflection.setVersion("agent-reflection-v1");
+            PayRiskAgentReflection.AssessorOpinion assessor = deepSeekClient.generateAssessorOpinion(contextJson);
+            reflection.setAssessor(assessor);
+            PayRiskAgentReflection.SkepticOpinion skeptic = deepSeekClient.generateSkepticOpinion(contextJson, assessor);
+            reflection.setSkeptic(skeptic);
+            reflection.setArbiter(deepSeekClient.generateArbiterOpinion(contextJson, assessor, skeptic));
+            return reflection;
+        } catch (Exception ex) {
+            log.warn("[buildAgentReflection] Agentic 反思流生成失败，跳过反思结果但保留主评估结果：{}", ex.getMessage(), ex);
+            return null;
+        }
+    }
+
+    private void applyAgentReflectionToResponse(AppPayRiskAssessRespVO respVO) {
+        PayRiskAgentReflection reflection = respVO.getAgentReflection();
+        if (reflection == null || reflection.getArbiter() == null) {
+            return;
+        }
+        PayRiskAgentReflection.ArbiterOpinion arbiter = reflection.getArbiter();
+        if (arbiter.getFinalScore() != null) {
+            respVO.setRiskScore(Math.min(100, Math.max(0, arbiter.getFinalScore())));
+        }
+        if (StrUtil.isNotBlank(arbiter.getFinalRiskLevel())) {
+            respVO.setRiskLevel(arbiter.getFinalRiskLevel());
+        }
+        if (StrUtil.isNotBlank(arbiter.getSummary())) {
+            String currentAnalysis = StrUtil.nullToDefault(respVO.getDeepAnalysis(), "").trim();
+            respVO.setDeepAnalysis(currentAnalysis + (currentAnalysis.isEmpty() ? "" : "\n\n")
+                    + "Agentic 反思流仲裁结论：" + arbiter.getSummary());
+        }
+        LinkedHashSet<String> factors = new LinkedHashSet<>();
+        if (respVO.getRiskFactors() != null) {
+            factors.addAll(respVO.getRiskFactors());
+        }
+        factors.add("已完成 Agentic 反思流：判定Agent → 质疑Agent → 仲裁Agent");
+        if (Boolean.TRUE.equals(arbiter.getNeedManualReview())) {
+            factors.add("仲裁Agent建议人工复核：存在争议点或证据不确定性");
+        }
+        respVO.setRiskFactors(new ArrayList<>(factors));
+    }
+
     private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
                                   AppPayRiskAssessRespVO respVO) {
         JsonNode paymentData = reqVO.getPaymentData();
@@ -675,6 +732,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         record.setTopologyInfoJson(JsonUtils.toJsonString(respVO.getTopologyInfo()));
         record.setLlmReportJson(JsonUtils.toJsonString(respVO.getLlmReport()));
         record.setAdvancedAnalysisJson(JsonUtils.toJsonString(respVO.getAdvancedAnalysis()));
+        record.setAgentReflectionJson(JsonUtils.toJsonString(respVO.getAgentReflection()));
         PayRiskDecisionResult decision = respVO.getDecision();
         if (decision != null) {
             record.setDecisionAction(decision.getRecommendedAction());

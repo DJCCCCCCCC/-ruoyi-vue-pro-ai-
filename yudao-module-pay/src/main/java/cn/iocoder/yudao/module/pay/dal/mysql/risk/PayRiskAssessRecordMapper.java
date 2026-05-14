@@ -62,7 +62,7 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
                 .orderByDesc(PayRiskAssessRecordDO::getId));
     }
 
-    default List<PayRiskAssessRecordDO> selectByIds(Collection<Long> ids) {
+    default List<PayRiskAssessRecordDO> selectByIdsOrderByDesc(Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             return Collections.emptyList();
         }

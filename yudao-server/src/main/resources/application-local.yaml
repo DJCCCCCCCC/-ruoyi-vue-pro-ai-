@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 48080
 
 --- #################### 数据库相关配置 ####################
@@ -58,7 +58,7 @@ spring:
           #          url: jdbc:kingbase8://127.0.0.1:54321/test  # 人大金仓 KingbaseES 连接的示例
           #          url: jdbc:postgresql://127.0.0.1:5432/postgres # OpenGauss 连接的示例
           username: root
-          password: 13926626806djc
+          password: L86325632l
           #          username: sa # SQL Server 连接的示例
           #          password: Yudao@2024 # SQL Server 连接的示例
           #          username: SYSDBA # DM 连接的示例
@@ -69,7 +69,7 @@ spring:
           lazy: true # 开启懒加载，保证启动速度
           url: jdbc:mysql://127.0.0.1:3306/new_schema?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&nullCatalogMeansCurrent=true
           username: root
-          password: 13926626806djc
+          password: L86325632l
 #        tdengine: # IoT 数据库（需要 IoT 物联网再开启噢！）
 #          lazy: true # 开启懒加载，保证启动速度
 #          url: jdbc:TAOS-WS://127.0.0.1:6041/ruoyi_vue_pro?varcharAsString=true
@@ -256,8 +256,8 @@ yudao:
         model: deepseek-chat # DeepSeek 模型
         temperature: 0.2 # 生成随机性
       ocr: # 图片多模态：先 OCR 再进 DeepSeek（Gitee OpenAI 兼容接口）
-        enabled: false # 设为 true 且配置 api-key 后生效
-        api-key: ${GITEE_OCR_API_KEY:} # 勿将密钥写入仓库，可用环境变量
+        enabled: true # 设为 true 且配置 api-key 后生效
+        api-key: YNDQSJY1R3VRLUVZTW12OCWFUFBLXBGVZ5ATDUZ4 # 本地调试使用，提交前请改为环境变量
         base-url: https://ai.gitee.com/v1
         model: DeepSeek-OCR-2
         timeout-millis: 120000

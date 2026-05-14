@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +80,7 @@ public class PayRiskGiteeOcrClient {
         body.put("model", model);
         body.put("temperature", 0.1);
         body.put("max_tokens", maxTokens > 0 ? maxTokens : 4096);
-        body.put("messages", List.of(userMsg));
+        body.put("messages", Collections.singletonList(userMsg));
 
         try (HttpResponse response = HttpUtil.createPost(url)
                 .header("Authorization", "Bearer " + apiKey.trim())
@@ -121,7 +122,7 @@ public class PayRiskGiteeOcrClient {
         JsonNode contentNode = choices.get(0).path("message").path("content");
         if (contentNode.isTextual()) {
             String t = contentNode.asText();
-            return t == null || t.isBlank() ? null : t.trim();
+            return t == null || t.trim().isEmpty() ? null : t.trim();
         }
         if (contentNode.isArray()) {
             StringBuilder sb = new StringBuilder();

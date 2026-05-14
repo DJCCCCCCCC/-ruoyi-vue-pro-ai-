@@ -4,8 +4,10 @@ import cn.hutool.http.HttpResponse;
 import cn.hutool.http.HttpUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAgentReflection;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAgentReflectionPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPromptBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -45,6 +47,10 @@ public class DeepSeekClient {
     /** 综合研判报告：结构化 JSON，单独配置便于调优速度 */
     @Value("${yudao.pay.risk-assess.deepseek.report-max-tokens:768}")
     private Integer reportMaxTokens;
+
+    /** Agentic 反思流：单个 Agent 的 JSON 输出长度 */
+    @Value("${yudao.pay.risk-assess.deepseek.agent-max-tokens:900}")
+    private Integer agentMaxTokens;
 
     @Value("${yudao.pay.risk-assess.http-timeout-millis:20000}")
     private Integer timeoutMillis;
@@ -93,6 +99,27 @@ public class DeepSeekClient {
         }
     }
 
+    public PayRiskAgentReflection.AssessorOpinion generateAssessorOpinion(String reflectionContextJson) {
+        String prompt = PayRiskAgentReflectionPromptBuilder.buildAssessorPrompt(reflectionContextJson);
+        return doAgenticJsonCall(prompt, PayRiskAgentReflectionPromptBuilder.ASSESSOR_SYSTEM_PROMPT,
+                PayRiskAgentReflection.AssessorOpinion.class, "assessor");
+    }
+
+    public PayRiskAgentReflection.SkepticOpinion generateSkepticOpinion(String reflectionContextJson,
+                                                                        PayRiskAgentReflection.AssessorOpinion assessor) {
+        String prompt = PayRiskAgentReflectionPromptBuilder.buildSkepticPrompt(reflectionContextJson, assessor);
+        return doAgenticJsonCall(prompt, PayRiskAgentReflectionPromptBuilder.SKEPTIC_SYSTEM_PROMPT,
+                PayRiskAgentReflection.SkepticOpinion.class, "skeptic");
+    }
+
+    public PayRiskAgentReflection.ArbiterOpinion generateArbiterOpinion(String reflectionContextJson,
+                                                                        PayRiskAgentReflection.AssessorOpinion assessor,
+                                                                        PayRiskAgentReflection.SkepticOpinion skeptic) {
+        String prompt = PayRiskAgentReflectionPromptBuilder.buildArbiterPrompt(reflectionContextJson, assessor, skeptic);
+        return doAgenticJsonCall(prompt, PayRiskAgentReflectionPromptBuilder.ARBITER_SYSTEM_PROMPT,
+                PayRiskAgentReflection.ArbiterOpinion.class, "arbiter");
+    }
+
     /**
      * 根据 OCR 合并文本，用自然语言概括图中文字可能涉及的支付/诈骗场景与风险点（不返回 JSON）。
      */
@@ -137,6 +164,22 @@ public class DeepSeekClient {
         return req;
     }
 
+    private <T> T doAgenticJsonCall(String userPrompt, String systemPrompt, Class<T> resultType, String agentName) {
+        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
+        }
+        String url = baseUrl + "/chat/completions";
+        int cap = agentMaxTokens != null && agentMaxTokens > 0 ? agentMaxTokens : maxTokens;
+        Map<String, Object> reqBody = buildRequestBody(userPrompt, systemPrompt, true, cap);
+        try {
+            return doCall(url, reqBody, resultType);
+        } catch (Exception firstEx) {
+            log.warn("[DeepSeekClient][{}] 第一次调用失败，重试(不含 response_format)：{}", agentName, firstEx.getMessage());
+            reqBody = buildRequestBody(userPrompt, systemPrompt, false, cap);
+            return doCall(url, reqBody, resultType);
+        }
+    }
+
     private String doCallPlainText(String url, Map<String, Object> reqBody) {
         try (HttpResponse response = HttpUtil.createPost(url)
                 .header("Authorization", "Bearer " + deepseekApiKey)
@@ -150,7 +193,7 @@ public class DeepSeekClient {
                 JsonNode contentNode = root.path("choices").get(0).path("message").path("content");
                 if (!contentNode.isMissingNode() && contentNode.isTextual()) {
                     String content = contentNode.asText();
-                    if (content != null && !content.isBlank()) {
+                    if (content != null && !content.trim().isEmpty()) {
                         return content.trim();
                     }
                 }

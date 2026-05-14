@@ -1,9 +1,10 @@
 package cn.iocoder.yudao.module.pay.controller.app.risk.vo;
 
-import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
-import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskRelationTopology;
-import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAgentReflection;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskRelationTopology;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -50,6 +51,10 @@ public class AppPayRiskAssessRespVO {
     @Schema(description = "Advanced risk analysis")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private PayRiskAdvancedAnalysis advancedAnalysis;
+
+    @Schema(description = "Agentic reflection result: assessor, skeptic and arbiter")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private PayRiskAgentReflection agentReflection;
 
     @Schema(description = "历史案例相似性加分", example = "12")
     private Integer caseSimilarityBonus;

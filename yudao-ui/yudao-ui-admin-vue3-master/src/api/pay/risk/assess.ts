@@ -20,6 +20,58 @@ export interface PayRiskDecisionResult {
   reviewHint?: string
 }
 
+export interface PayRiskAgentReflection {
+  version?: string
+  assessor?: {
+    preliminaryScore?: number
+    riskLevel?: string
+    recommendation?: string
+    confidence?: number
+    coreClaims?: Array<{
+      claim?: string
+      evidenceIds?: string[]
+      reasoning?: string
+      confidence?: number
+    }>
+    counterSignalsSeen?: string[]
+    uncertainties?: string[]
+  }
+  skeptic?: {
+    overallChallengeStrength?: number
+    issues?: Array<{
+      targetClaim?: string
+      issueType?: string
+      description?: string
+      severity?: string
+      suggestedAdjustment?: string
+    }>
+    missedCounterEvidence?: string[]
+    hallucinationFlags?: string[]
+    revisedScoreSuggestion?: number
+  }
+  arbiter?: {
+    finalScore?: number
+    finalRiskLevel?: string
+    finalDecision?: string
+    confidence?: number
+    uncertainty?: number
+    disputeLevel?: string
+    needManualReview?: boolean
+    adoptedPoints?: Array<{
+      from?: string
+      point?: string
+      reason?: string
+    }>
+    rejectedPoints?: Array<{
+      from?: string
+      point?: string
+      reason?: string
+    }>
+    manualReviewFocus?: string[]
+    summary?: string
+  }
+}
+
 export interface PayRiskAssessRespVO {
   riskScore: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
@@ -31,6 +83,7 @@ export interface PayRiskAssessRespVO {
   topologyInfo?: PayRiskRelationTopology
   llmReport?: PayRiskLlmReport
   advancedAnalysis?: PayRiskAdvancedAnalysis
+  agentReflection?: PayRiskAgentReflection
   caseSimilarityBonus?: number
   decision?: PayRiskDecisionResult
   embeddedImageCount?: number
@@ -172,6 +225,7 @@ export interface PayRiskAssessRecordVO {
   topologyInfoJson?: string
   llmReportJson?: string
   advancedAnalysisJson?: string
+  agentReflectionJson?: string
   decisionAction?: string
   decisionJson?: string
   reviewStatus?: string

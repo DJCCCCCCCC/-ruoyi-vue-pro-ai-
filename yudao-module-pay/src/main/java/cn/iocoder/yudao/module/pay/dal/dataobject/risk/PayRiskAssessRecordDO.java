@@ -78,6 +78,11 @@ public class PayRiskAssessRecordDO extends BaseDO {
     private String advancedAnalysisJson;
 
     /**
+     * Agentic 反思流 JSON（判定/质疑/仲裁）
+     */
+    private String agentReflectionJson;
+
+    /**
      * 策略建议动作：ALLOW / MANUAL_REVIEW / BLOCK
      */
     private String decisionAction;

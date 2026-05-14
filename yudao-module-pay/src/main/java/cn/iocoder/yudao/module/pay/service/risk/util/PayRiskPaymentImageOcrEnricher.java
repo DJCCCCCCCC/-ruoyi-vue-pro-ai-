@@ -136,7 +136,7 @@ public final class PayRiskPaymentImageOcrEnricher {
         } else {
             sb.append("，但未得到有效文字（接口失败或图中缺少清晰可识别文字）。模型主要依据聊天原文与其它情报分析。");
         }
-        if (preview != null && !preview.isBlank()) {
+        if (preview != null && !preview.trim().isEmpty()) {
             sb.append(" 识别内容预览：");
             sb.append(preview);
         }
@@ -220,7 +220,7 @@ public final class PayRiskPaymentImageOcrEnricher {
         }
         counter[0]++;
         String text = ocrClient.recognizeImageDataUrl(dataUrl);
-        if (text != null && !text.isBlank()) {
+        if (text != null && !text.trim().isEmpty()) {
             ocrPieces.add(text.trim());
             return text.trim();
         }
@@ -229,7 +229,7 @@ public final class PayRiskPaymentImageOcrEnricher {
     }
 
     private static String placeholderForReplacedImage(String ocr) {
-        if (ocr == null || ocr.isBlank()) {
+        if (ocr == null || ocr.trim().isEmpty()) {
             return "[图片:已尝试OCR，未得到有效文字]";
         }
         return "[图片:已OCR识别，原文数据已省略]";
