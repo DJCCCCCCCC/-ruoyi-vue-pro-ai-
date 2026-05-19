@@ -10,6 +10,7 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -69,5 +70,16 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
         return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
                 .in(PayRiskAssessRecordDO::getId, ids)
                 .orderByDesc(PayRiskAssessRecordDO::getId));
+    }
+
+    /**
+     * 历史案例相似度候选集：只取最近的高风险/需复核记录，避免历史表增长后全量扫描。
+     */
+    default List<PayRiskAssessRecordDO> selectRecentSimilarityCandidates(int limit) {
+        int safeLimit = limit <= 0 ? 500 : Math.min(limit, 5000);
+        return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .in(PayRiskAssessRecordDO::getRiskLevel, Arrays.asList("MEDIUM", "HIGH", "CRITICAL"))
+                .orderByDesc(PayRiskAssessRecordDO::getId)
+                .last("LIMIT " + safeLimit));
     }
 }

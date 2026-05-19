@@ -250,11 +250,27 @@ yudao:
     risk-assess: # 支付风险评估（ipinfo + DeepSeek）
       ipinfo:
         token: "b3f594c0db57e4" # 你的 ipinfo token（不要写在代码里）
+        cache-enabled: true
+        cache-ttl-millis: 259200000 # 3 天，避免同一 IP 重复查询
+      cache-max-size: 2048
       whoisxml:
         api-key: "at_eMtKzgvr28EhV7ArM71LX6SbBd6kW"
+        cache-enabled: true
+        cache-ttl-millis: 2592000000 # 30 天，避免同一域名重复查询 Whois
       deepseek:
         model: deepseek-chat # DeepSeek 模型
         temperature: 0.2 # 生成随机性
+      agent-reflection: # 三 Agent 反思流：provider=dify 时调用 Dify Workflow，失败可回退 DeepSeek
+        provider: dify # dify / deepseek
+        async: true # 主接口先返回基础风控结论，反思流后台异步回写记录
+        fallback-to-deepseek: true
+        dify:
+          base-url: https://api.dify.ai/v1 # Dify API 地址
+          api-key: "app-GMVR30QBLvWLz4jttXsI98Ka" # Dify Workflow App API Key
+          input-name: reflection_context_json # Workflow Start 输入变量名
+          output-name: agent_reflection_json # Workflow End 输出变量名
+          user: pay-risk-system
+          timeout-millis: 90000
       ocr: # 图片多模态：先 OCR 再进 DeepSeek（Gitee OpenAI 兼容接口）
         enabled: true # 设为 true 且配置 api-key 后生效
         api-key: YNDQSJY1R3VRLUVZTW12OCWFUFBLXBGVZ5ATDUZ4 # 本地调试使用，提交前请改为环境变量

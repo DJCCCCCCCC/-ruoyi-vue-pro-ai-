@@ -20,7 +20,10 @@ import java.util.Set;
 @UtilityClass
 public class PayRiskCaseSimilarityAnalyzer {
 
-    private static final int MAX_CANDIDATES = 120;
+    /**
+     * 控制历史案例相似度的候选扫描范围，默认只看最近 500 条中高风险记录，避免历史表增长后变慢。
+     */
+    private static final int MAX_CANDIDATES = 500;
     private static final int MAX_MATCHES = 5;
     private static final double MIN_MATCH_SCORE = 0.28d;
 
@@ -29,9 +32,7 @@ public class PayRiskCaseSimilarityAnalyzer {
                                                JsonNode whoisInfo,
                                                PayRiskAssessRecordMapper mapper) {
         CaseFingerprint current = CaseFingerprint.from(paymentData, ipInfo, whoisInfo, null, null, null);
-        List<PayRiskAssessRecordDO> records = mapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayRiskAssessRecordDO>()
-                .orderByDesc(PayRiskAssessRecordDO::getId)
-                .last("LIMIT " + MAX_CANDIDATES));
+        List<PayRiskAssessRecordDO> records = mapper.selectRecentSimilarityCandidates(MAX_CANDIDATES);
 
         List<PayRiskAdvancedAnalysis.CaseSimilarityMatch> matches = new ArrayList<>();
         for (PayRiskAssessRecordDO record : records) {

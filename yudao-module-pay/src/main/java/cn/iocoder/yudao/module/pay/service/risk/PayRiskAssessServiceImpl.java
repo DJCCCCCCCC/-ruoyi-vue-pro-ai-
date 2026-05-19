@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
 import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
+import cn.iocoder.yudao.module.pay.service.risk.client.DifyAgentReflectionClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.PayRiskGiteeOcrClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
@@ -63,8 +64,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
@@ -89,6 +92,13 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     /** 图片 OCR 专项 LLM 解读：合并正文输入上限 */
     private static final int IMAGE_OCR_LLM_INPUT_MAX_CHARS = 12000;
 
+    private static final long DEFAULT_IP_INFO_CACHE_TTL_MILLIS = TimeUnit.DAYS.toMillis(3);
+    private static final long DEFAULT_WHOIS_CACHE_TTL_MILLIS = TimeUnit.DAYS.toMillis(30);
+    private static final int DEFAULT_RISK_ASSESS_CACHE_MAX_SIZE = 2048;
+
+    private final ConcurrentHashMap<String, CacheEntry<JsonNode>> ipInfoCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CacheEntry<JsonNode>> whoisCache = new ConcurrentHashMap<>();
+
     @PreDestroy
     public void shutdownRiskAssessExecutor() {
         riskAssessExecutor.shutdown();
@@ -99,6 +109,33 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Resource
     private DeepSeekClient deepSeekClient;
+
+    @Resource
+    private DifyAgentReflectionClient difyAgentReflectionClient;
+
+    @Value("${yudao.pay.risk-assess.agent-reflection.provider:deepseek}")
+    private String agentReflectionProvider;
+
+    @Value("${yudao.pay.risk-assess.agent-reflection.fallback-to-deepseek:true}")
+    private boolean agentReflectionFallbackToDeepSeek;
+
+    @Value("${yudao.pay.risk-assess.agent-reflection.async:true}")
+    private boolean agentReflectionAsync;
+
+    @Value("${yudao.pay.risk-assess.ipinfo.cache-enabled:true}")
+    private boolean ipInfoCacheEnabled;
+
+    @Value("${yudao.pay.risk-assess.ipinfo.cache-ttl-millis:259200000}")
+    private long ipInfoCacheTtlMillis;
+
+    @Value("${yudao.pay.risk-assess.whoisxml.cache-enabled:true}")
+    private boolean whoisCacheEnabled;
+
+    @Value("${yudao.pay.risk-assess.whoisxml.cache-ttl-millis:2592000000}")
+    private long whoisCacheTtlMillis;
+
+    @Value("${yudao.pay.risk-assess.cache-max-size:2048}")
+    private int riskAssessCacheMaxSize;
 
     @Resource
     private PayRiskGiteeOcrClient payRiskGiteeOcrClient;
@@ -139,7 +176,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_IP_MISSING);
         }
 
-        JsonNode ipInfo = ipInfoClient.fetchIpInfo(ip);
+        JsonNode ipInfo = fetchIpInfoWithCache(ip);
         JsonNode paymentMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(paymentData);
         JsonNode ipInfoMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(ipInfo);
 
@@ -242,14 +279,19 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         if (respVO.getAdvancedAnalysis() != null) {
             respVO.getAdvancedAnalysis().setCaseMatches(caseSimilarityResult.getMatches());
         }
-        respVO.setAgentReflection(buildAgentReflection(paymentMaskedJsonNode, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
-        applyAgentReflectionToResponse(respVO);
+        if (!agentReflectionAsync) {
+            respVO.setAgentReflection(buildAgentReflection(paymentMaskedJsonNode, ipInfoMaskedJsonNode, whoisInfoNode, respVO));
+            applyAgentReflectionToResponse(respVO);
+        }
 
         PayRiskDecisionResult decision = payRiskDecisionEngine.decide(respVO.getRiskScore(), respVO.getRiskLevel(),
                 respVO.getCaseSimilarityBonus(), respVO.getLlmReport());
         respVO.setDecision(decision);
 
-        saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
+        PayRiskAssessRecordDO record = saveAssessRecord(reqVO, ip, ipInfoMaskedJsonNode, respVO);
+        if (agentReflectionAsync && record != null && record.getId() != null) {
+            submitAgentReflectionAsync(record.getId(), paymentMaskedJsonNode, ipInfoMaskedJsonNode, whoisInfoNode, respVO);
+        }
         return respVO;
     }
 
@@ -425,7 +467,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         List<PayRiskWhoisAnalyzer.WhoisLookupResult> lookupResults = new ArrayList<>();
         for (String domain : domains) {
             log.info("[assessWhoisRisk] 正在查询域名 Whois 信息: {}", domain);
-            JsonNode payload = whoisXmlApiClient.lookupDomain(domain);
+            JsonNode payload = lookupWhoisWithCache(domain);
             log.info("[assessWhoisInfo] 域名 {} 查询完成, 是否有错误: {}", domain,
                     payload != null && payload.path("ErrorMessage").isMissingNode() ? "否" : "是");
             lookupResults.add(new PayRiskWhoisAnalyzer.WhoisLookupResult(domain, payload));
@@ -672,18 +714,74 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 respVO.getLlmReport(), respVO.getAdvancedAnalysis());
         String contextJson = JsonUtils.toJsonString(contextNode);
         try {
-            PayRiskAgentReflection reflection = new PayRiskAgentReflection();
-            reflection.setVersion("agent-reflection-v1");
-            PayRiskAgentReflection.AssessorOpinion assessor = deepSeekClient.generateAssessorOpinion(contextJson);
-            reflection.setAssessor(assessor);
-            PayRiskAgentReflection.SkepticOpinion skeptic = deepSeekClient.generateSkepticOpinion(contextJson, assessor);
-            reflection.setSkeptic(skeptic);
-            reflection.setArbiter(deepSeekClient.generateArbiterOpinion(contextJson, assessor, skeptic));
-            return reflection;
+            if ("dify".equalsIgnoreCase(StrUtil.nullToDefault(agentReflectionProvider, ""))) {
+                try {
+                    PayRiskAgentReflection reflection = difyAgentReflectionClient.generateAgentReflection(contextJson);
+                    if (reflection != null && StrUtil.isBlank(reflection.getVersion())) {
+                        reflection.setVersion("agent-reflection-v1-dify");
+                    }
+                    return reflection;
+                } catch (Exception difyEx) {
+                    if (!agentReflectionFallbackToDeepSeek) {
+                        throw difyEx;
+                    }
+                    log.warn("[buildAgentReflection] Dify 反思流失败，回退 DeepSeek 三 Agent：{}", difyEx.getMessage());
+                }
+            }
+            return buildDeepSeekAgentReflection(contextJson);
         } catch (Exception ex) {
             log.warn("[buildAgentReflection] Agentic 反思流生成失败，跳过反思结果但保留主评估结果：{}", ex.getMessage(), ex);
             return null;
         }
+    }
+
+    private PayRiskAgentReflection buildDeepSeekAgentReflection(String contextJson) {
+        PayRiskAgentReflection reflection = new PayRiskAgentReflection();
+        reflection.setVersion("agent-reflection-v1-deepseek");
+        PayRiskAgentReflection.AssessorOpinion assessor = deepSeekClient.generateAssessorOpinion(contextJson);
+        reflection.setAssessor(assessor);
+        PayRiskAgentReflection.SkepticOpinion skeptic = deepSeekClient.generateSkepticOpinion(contextJson, assessor);
+        reflection.setSkeptic(skeptic);
+        reflection.setArbiter(deepSeekClient.generateArbiterOpinion(contextJson, assessor, skeptic));
+        return reflection;
+    }
+
+    private void submitAgentReflectionAsync(Long recordId,
+                                            JsonNode paymentMaskedJsonNode,
+                                            JsonNode ipInfoMaskedJsonNode,
+                                            JsonNode whoisInfoNode,
+                                            AppPayRiskAssessRespVO baseRespVO) {
+        AppPayRiskAssessRespVO snapshot = JsonUtils.parseObject(JsonUtils.toJsonString(baseRespVO), AppPayRiskAssessRespVO.class);
+        CompletableFuture.runAsync(() -> {
+            try {
+                PayRiskAgentReflection reflection = buildAgentReflection(paymentMaskedJsonNode, ipInfoMaskedJsonNode, whoisInfoNode, snapshot);
+                snapshot.setAgentReflection(reflection);
+                applyAgentReflectionToResponse(snapshot);
+                PayRiskDecisionResult decision = payRiskDecisionEngine.decide(snapshot.getRiskScore(), snapshot.getRiskLevel(),
+                        snapshot.getCaseSimilarityBonus(), snapshot.getLlmReport());
+                snapshot.setDecision(decision);
+
+                PayRiskAssessRecordDO update = new PayRiskAssessRecordDO();
+                update.setId(recordId);
+                update.setRiskScore(snapshot.getRiskScore());
+                update.setRiskLevel(snapshot.getRiskLevel());
+                update.setDeepAnalysis(snapshot.getDeepAnalysis());
+                update.setRiskFactorsJson(JsonUtils.toJsonString(snapshot.getRiskFactors()));
+                update.setAgentReflectionJson(JsonUtils.toJsonString(reflection));
+                if (decision != null) {
+                    update.setDecisionAction(decision.getRecommendedAction());
+                    update.setDecisionJson(JsonUtils.toJsonString(decision));
+                    update.setReviewStatus(decision.isRequiresHumanReview()
+                            ? PayRiskReviewStatusConstants.PENDING
+                            : PayRiskReviewStatusConstants.NOT_REQUIRED);
+                }
+                payRiskAssessRecordMapper.updateById(update);
+                log.info("[submitAgentReflectionAsync] Agentic 反思流已异步回写，recordId={}", recordId);
+            } catch (Exception ex) {
+                log.warn("[submitAgentReflectionAsync] Agentic 反思流异步回写失败，recordId={}, error={}",
+                        recordId, ex.getMessage(), ex);
+            }
+        }, riskAssessExecutor);
     }
 
     private void applyAgentReflectionToResponse(AppPayRiskAssessRespVO respVO) {
@@ -714,8 +812,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         respVO.setRiskFactors(new ArrayList<>(factors));
     }
 
-    private void saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
-                                  AppPayRiskAssessRespVO respVO) {
+    private PayRiskAssessRecordDO saveAssessRecord(AppPayRiskAssessReqVO reqVO, String ip, JsonNode ipInfoMaskedJsonNode,
+                                                   AppPayRiskAssessRespVO respVO) {
         JsonNode paymentData = reqVO.getPaymentData();
         PayRiskAssessRecordDO record = new PayRiskAssessRecordDO();
         record.setScene(readText(paymentData, "scene"));
@@ -745,9 +843,75 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         }
         try {
             payRiskAssessRecordMapper.insert(record);
+            return record;
         } catch (Exception ex) {
             log.warn("[saveAssessRecord] 风险分析结果保存失败，将跳过落库但继续返回分析结果。scene={}, source={}, error={}",
                     record.getScene(), record.getSource(), ex.getMessage(), ex);
+            return null;
+        }
+    }
+
+    private JsonNode fetchIpInfoWithCache(String ip) {
+        if (!ipInfoCacheEnabled) {
+            return ipInfoClient.fetchIpInfo(ip);
+        }
+        String cacheKey = ip == null ? "" : ip.trim();
+        return getOrLoadJsonCache(ipInfoCache, cacheKey, ipInfoCacheTtlMillis,
+                () -> ipInfoClient.fetchIpInfo(ip), "ipinfo");
+    }
+
+    private JsonNode lookupWhoisWithCache(String domain) {
+        if (!whoisCacheEnabled) {
+            return whoisXmlApiClient.lookupDomain(domain);
+        }
+        String cacheKey = domain == null ? "" : domain.trim().toLowerCase();
+        return getOrLoadJsonCache(whoisCache, cacheKey, whoisCacheTtlMillis,
+                () -> whoisXmlApiClient.lookupDomain(domain), "whois");
+    }
+
+    private JsonNode getOrLoadJsonCache(ConcurrentHashMap<String, CacheEntry<JsonNode>> cache,
+                                        String key,
+                                        long ttlMillis,
+                                        JsonNodeSupplier loader,
+                                        String cacheName) {
+        if (StrUtil.isBlank(key) || ttlMillis <= 0) {
+            return loader.get();
+        }
+        long now = System.currentTimeMillis();
+        CacheEntry<JsonNode> cached = cache.get(key);
+        if (cached != null && cached.expireAtMillis > now) {
+            log.debug("[getOrLoadJsonCache] {} cache hit, key={}", cacheName, key);
+            return cached.value;
+        }
+        JsonNode value = loader.get();
+        trimCacheIfNecessary(cache);
+        cache.put(key, new CacheEntry<>(value, now + ttlMillis));
+        return value;
+    }
+
+    private void trimCacheIfNecessary(ConcurrentHashMap<String, CacheEntry<JsonNode>> cache) {
+        int maxSize = riskAssessCacheMaxSize <= 0 ? DEFAULT_RISK_ASSESS_CACHE_MAX_SIZE : riskAssessCacheMaxSize;
+        if (cache.size() < maxSize) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        cache.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue().expireAtMillis <= now);
+        if (cache.size() >= maxSize) {
+            cache.clear();
+        }
+    }
+
+    private interface JsonNodeSupplier {
+        JsonNode get();
+    }
+
+    private static final class CacheEntry<T> {
+        private final T value;
+        private final long expireAtMillis;
+
+        private CacheEntry(T value, long expireAtMillis) {
+            this.value = value;
+            this.expireAtMillis = expireAtMillis;
         }
     }
 
