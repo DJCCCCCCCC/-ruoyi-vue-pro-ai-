@@ -44,8 +44,8 @@ public class DeepSeekClient {
     @Value("${yudao.pay.risk-assess.deepseek.assess-max-tokens:512}")
     private Integer assessMaxTokens;
 
-    /** 综合研判报告：结构化 JSON，单独配置便于调优速度 */
-    @Value("${yudao.pay.risk-assess.deepseek.report-max-tokens:768}")
+    /** 综合研判报告：含 personaProfile + tailoredUserGuidance，需足够 token 避免 JSON 截断 */
+    @Value("${yudao.pay.risk-assess.deepseek.report-max-tokens:2048}")
     private Integer reportMaxTokens;
 
     /** Agentic 反思流：单个 Agent 的 JSON 输出长度 */
@@ -95,7 +95,12 @@ public class DeepSeekClient {
         } catch (Exception firstEx) {
             log.warn("[DeepSeekClient][generateRiskReport] 第一次调用失败，重试(不含 response_format)：{}", firstEx.getMessage());
             reqBody = buildRequestBody(userPrompt, PayRiskLlmReportPromptBuilder.SYSTEM_PROMPT, false, cap);
-            return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
+            try {
+                return doCall(url, reqBody, PayRiskLlmAnalysisReport.class);
+            } catch (Exception secondEx) {
+                log.warn("[DeepSeekClient][generateRiskReport] 解析失败，将由上层使用 FALLBACK 报告：{}", secondEx.getMessage());
+                return null;
+            }
         }
     }
 
@@ -214,14 +219,20 @@ public class DeepSeekClient {
                 .execute()) {
             String body = response.body();
             JsonNode root = JsonUtils.parseTree(body);
-            String content = root.path("choices").isArray() && root.path("choices").size() > 0 ?
-                    root.path("choices").get(0).path("message").path("content").asText() : null;
+            JsonNode firstChoice = root.path("choices").isArray() && root.path("choices").size() > 0
+                    ? root.path("choices").get(0) : null;
+            String content = firstChoice != null ? firstChoice.path("message").path("content").asText() : null;
             if (content == null) {
                 throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, body);
             }
+            String finishReason = firstChoice.path("finish_reason").asText("");
+            if ("length".equals(finishReason)) {
+                log.warn("[DeepSeekClient][doCall] 模型输出因 max_tokens 被截断，finish_reason=length，type={}",
+                        resultType.getSimpleName());
+            }
 
             String jsonText = extractJsonObject(content);
-            T result = JsonUtils.parseObject(jsonText, resultType);
+            T result = parseJsonLenient(jsonText, resultType);
             if (result instanceof PayRiskAssessAiResponse) {
                 PayRiskAssessAiResponse aiResponse = (PayRiskAssessAiResponse) result;
                 if (aiResponse.getRiskScore() == null
@@ -257,11 +268,79 @@ public class DeepSeekClient {
             }
         }
         int start = text.indexOf('{');
+        if (start < 0) {
+            return text;
+        }
         int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
+        if (end > start) {
             return text.substring(start, end + 1);
         }
-        return text;
+        return text.substring(start);
+    }
+
+    /**
+     * 先正常解析；失败时对截断 JSON 补全括号后再试（常见于 report-max-tokens 不足）。
+     */
+    private <T> T parseJsonLenient(String jsonText, Class<T> resultType) {
+        if (jsonText == null || jsonText.trim().isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
+        }
+        try {
+            return JsonUtils.parseObject(jsonText, resultType);
+        } catch (Exception first) {
+            String repaired = repairTruncatedJson(jsonText);
+            if (repaired.equals(jsonText)) {
+                throw first;
+            }
+            log.warn("[DeepSeekClient] JSON 解析失败，尝试补全截断括号后重试，type={}", resultType.getSimpleName());
+            return JsonUtils.parseObject(repaired, resultType);
+        }
+    }
+
+    /**
+     * 为未闭合的 {、[ 补全结束符（不处理字符串中间的截断）。
+     */
+    private static String repairTruncatedJson(String json) {
+        if (json == null) {
+            return "";
+        }
+        String s = json.trim();
+        while (s.endsWith(",")) {
+            s = s.substring(0, s.length() - 1).trim();
+        }
+        int braceDepth = 0;
+        int bracketDepth = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' && (i == 0 || s.charAt(i - 1) != '\\')) {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (c == '{') {
+                braceDepth++;
+            } else if (c == '}') {
+                braceDepth--;
+            } else if (c == '[') {
+                bracketDepth++;
+            } else if (c == ']') {
+                bracketDepth--;
+            }
+        }
+        if (braceDepth <= 0 && bracketDepth <= 0) {
+            return s;
+        }
+        StringBuilder sb = new StringBuilder(s);
+        for (int i = 0; i < bracketDepth; i++) {
+            sb.append(']');
+        }
+        for (int i = 0; i < braceDepth; i++) {
+            sb.append('}');
+        }
+        return sb.toString();
     }
 }
 

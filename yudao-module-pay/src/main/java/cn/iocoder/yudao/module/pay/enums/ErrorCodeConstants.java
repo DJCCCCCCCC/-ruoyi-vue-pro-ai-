@@ -107,5 +107,14 @@ public interface ErrorCodeConstants {
     ErrorCode PAY_RISK_ASSESS_TERM_PARAM_INVALID = new ErrorCode(1_007_010_009, "风险词参数不合法");
     ErrorCode PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW = new ErrorCode(1_007_010_010, "该风险词不在今日新增列表中，无法查看穿透详情");
     ErrorCode PAY_RISK_IMAGE_ANALYZE_NO_VALID_DATA_URL = new ErrorCode(1_007_010_011, "未检测到有效的图片 data URL，请使用 data:image/...;base64,... 格式");
+    ErrorCode PAY_RISK_ASR_NOT_ENABLED = new ErrorCode(1_007_010_012, "语音识别未启用，请配置 yudao.pay.risk-assess.asr");
+    ErrorCode PAY_RISK_ASR_FILE_EMPTY = new ErrorCode(1_007_010_013, "请上传有效的音频文件");
+    ErrorCode PAY_RISK_ASR_FILE_TOO_LARGE = new ErrorCode(1_007_010_014, "音频文件过大，请缩短录音后重试");
+    ErrorCode PAY_RISK_ASR_CALL_FAILED = new ErrorCode(1_007_010_015, "语音识别失败，请稍后重试");
+    ErrorCode PAY_RISK_ASR_EMPTY_RESULT = new ErrorCode(1_007_010_016, "未识别到有效语音内容");
+
+    ErrorCode PAY_RISK_TERM_NOT_FOUND = new ErrorCode(1_007_010_020, "风险词不存在");
+    ErrorCode PAY_RISK_TERM_EXISTS = new ErrorCode(1_007_010_021, "风险词已存在");
+    ErrorCode PAY_RISK_TERM_TEXT_INVALID = new ErrorCode(1_007_010_022, "风险词不合法或超过长度限制");
 
 }

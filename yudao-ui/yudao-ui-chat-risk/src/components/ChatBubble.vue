@@ -10,6 +10,12 @@
         <span class="time">{{ formatTime(message.timestamp) }}</span>
       </div>
       <div class="bubble">
+        <div
+          v-if="message.voice"
+          :class="['message-voice', message.type === 'self' ? 'is-self' : 'is-peer']"
+        >
+          <VoiceMessageBar :src="message.voice.dataUrl" :duration-sec="message.voice.durationSec" />
+        </div>
         <div v-if="message.images?.length" class="message-images">
           <img
             v-for="(img, idx) in message.images"
@@ -20,7 +26,8 @@
             loading="lazy"
           />
         </div>
-        <div v-if="message.content" class="message-text">
+        <div v-if="message.content" class="message-text" :class="{ 'is-transcript': message.voice }">
+          <span v-if="message.voice" class="transcript-label">转写</span>
           <pre v-if="message.type === 'self'">{{ message.content }}</pre>
           <p v-else>{{ message.content }}</p>
         </div>
@@ -32,6 +39,7 @@
 
 <script setup lang="ts">
 import dayjs from 'dayjs'
+import VoiceMessageBar from '@/components/VoiceMessageBar.vue'
 import type { ChatMessage } from '@/types'
 
 interface Props {
@@ -133,6 +141,31 @@ const formatTime = (date: Date) => dayjs(date).format('HH:mm')
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-voice {
+  margin-bottom: 8px;
+}
+
+.message-voice:last-child {
+  margin-bottom: 0;
+}
+
+.message-text.is-transcript {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.35);
+}
+
+.transcript-label {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.15);
+  vertical-align: middle;
 }
 
 .message-images {

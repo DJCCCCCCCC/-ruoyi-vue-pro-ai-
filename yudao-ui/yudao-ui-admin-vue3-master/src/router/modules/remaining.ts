@@ -474,6 +474,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
         component: () => import('@/views/pay/risk/assess/index.vue')
       },
       {
+        path: 'risk-term',
+        name: 'PayRiskTerm',
+        meta: {
+          title: '风险词库',
+          noCache: false,
+          hidden: false
+        },
+        component: () => import('@/views/pay/risk/term/index.vue')
+      },
+      {
         path: 'risk-chat',
         name: 'PayRiskChat',
         meta: {

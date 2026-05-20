@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordP
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskSpeechTranscribeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermRelatedTicketVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
@@ -14,11 +15,13 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTerms
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
+import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskTermDO;
 import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.client.DeepSeekClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.DifyAgentReflectionClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.IpInfoClient;
+import cn.iocoder.yudao.module.pay.service.risk.client.PayRiskGiteeAsrClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.PayRiskGiteeOcrClient;
 import cn.iocoder.yudao.module.pay.service.risk.client.WhoisXmlApiClient;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAdvancedAnalysis;
@@ -46,10 +49,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -140,6 +145,12 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Resource
     private PayRiskGiteeOcrClient payRiskGiteeOcrClient;
 
+    @Resource
+    private PayRiskGiteeAsrClient payRiskGiteeAsrClient;
+
+    @Value("${yudao.pay.risk-assess.asr.max-file-bytes:10485760}")
+    private long asrMaxFileBytes;
+
     @Value("${yudao.pay.risk-assess.ocr.max-payload-chars:15000000}")
     private long ocrMaxPayloadChars;
 
@@ -154,6 +165,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     @Resource
     private PayRiskAssessRecordMapper payRiskAssessRecordMapper;
+
+    @Resource
+    private PayRiskTermService payRiskTermService;
 
     @Resource
     private PayRiskDecisionEngine payRiskDecisionEngine;
@@ -518,12 +532,16 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 caseSimilarityResult);
         try {
             PayRiskLlmAnalysisReport report = deepSeekClient.generateRiskReport(JsonUtils.toJsonString(contextNode));
-            if (report != null && (report.getMode() == null || report.getMode().trim().isEmpty())) {
+            if (report == null) {
+                log.warn("[buildLlmAnalysisReport] LLM 报告为空或解析失败，使用 FALLBACK 报告");
+                return PayRiskLlmReportFallbackBuilder.build(contextNode);
+            }
+            if (report.getMode() == null || report.getMode().trim().isEmpty()) {
                 report.setMode("LLM");
             }
             return report;
         } catch (Exception ex) {
-            log.warn("[buildLlmAnalysisReport] LLM 缁煎悎鐮旀壒澶辫触锛屼娇鐢ㄥ厹搴曟姤鍛?{}", ex.getMessage());
+            log.warn("[buildLlmAnalysisReport] LLM 综合研判失败，使用兜底报告：{}", ex.getMessage());
             return PayRiskLlmReportFallbackBuilder.build(contextNode);
         }
     }
@@ -843,6 +861,9 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         }
         try {
             payRiskAssessRecordMapper.insert(record);
+            if (record.getId() != null) {
+                payRiskTermService.syncFactorsFromAssess(respVO.getRiskFactors(), record.getId());
+            }
             return record;
         } catch (Exception ex) {
             log.warn("[saveAssessRecord] 风险分析结果保存失败，将跳过落库但继续返回分析结果。scene={}, source={}, error={}",
@@ -1203,16 +1224,22 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Override
     public PayRiskTodayNewTermsRespVO getTodayNewRiskTerms() {
         LocalDateTime[] range = resolveLocalTodayRange();
-        Map<String, LinkedHashSet<Long>> termToIds = computeTodayNewTermToRecordIds(range[0], range[1]);
         PayRiskTodayNewTermsRespVO resp = new PayRiskTodayNewTermsRespVO();
-        List<PayRiskTodayNewTermItemVO> items = termToIds.entrySet().stream().map(e -> {
-            PayRiskTodayNewTermItemVO vo = new PayRiskTodayNewTermItemVO();
-            vo.setTerm(e.getKey());
-            vo.setTodayHitCount(e.getValue().size());
-            vo.setRelatedRecordIds(new ArrayList<>(e.getValue()));
-            return vo;
-        }).sorted(Comparator.comparing(PayRiskTodayNewTermItemVO::getTodayHitCount).reversed()
-                .thenComparing(PayRiskTodayNewTermItemVO::getTerm, Comparator.nullsLast(String::compareTo)))
+        List<PayRiskTodayNewTermItemVO> items = payRiskTermService.listTodayNewTerms(range[0], range[1]).stream()
+                .map(termRow -> {
+                    PayRiskTodayNewTermItemVO vo = new PayRiskTodayNewTermItemVO();
+                    vo.setTerm(termRow.getTerm());
+                    List<Long> recordIds = payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]);
+                    int todayHits = payRiskTermService.countTodayHits(termRow.getId(), range[0], range[1]);
+                    vo.setTodayHitCount(todayHits > 0 ? todayHits : 1);
+                    vo.setRelatedRecordIds(recordIds);
+                    vo.setTermId(termRow.getId());
+                    vo.setSourceType(termRow.getSourceType());
+                    vo.setHitCount(termRow.getHitCount());
+                    return vo;
+                })
+                .sorted(Comparator.comparing(PayRiskTodayNewTermItemVO::getTodayHitCount).reversed()
+                        .thenComparing(PayRiskTodayNewTermItemVO::getTerm, Comparator.nullsLast(String::compareTo)))
                 .collect(Collectors.toList());
         resp.setTerms(items);
         return resp;
@@ -1225,12 +1252,20 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_PARAM_INVALID);
         }
         LocalDateTime[] range = resolveLocalTodayRange();
-        Map<String, LinkedHashSet<Long>> termToIds = computeTodayNewTermToRecordIds(range[0], range[1]);
-        LinkedHashSet<Long> matchedIds = termToIds.get(term);
-        if (matchedIds == null || matchedIds.isEmpty()) {
+        PayRiskTermDO termRow = payRiskTermService.getTermByText(term);
+        if (termRow == null || termRow.getFirstSeenTime() == null
+                || termRow.getFirstSeenTime().isBefore(range[0])
+                || !termRow.getFirstSeenTime().isBefore(range[1])) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW);
         }
-        List<PayRiskAssessRecordDO> records = payRiskAssessRecordMapper.selectByIds(matchedIds);
+        List<Long> matchedIds = payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]);
+        if (matchedIds.isEmpty() && termRow.getFirstRecordId() != null) {
+            matchedIds = Collections.singletonList(termRow.getFirstRecordId());
+        }
+        if (matchedIds.isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW);
+        }
+        List<PayRiskAssessRecordDO> records = payRiskAssessRecordMapper.selectByIdsOrderByDesc(matchedIds);
         List<PayRiskTermRelatedTicketVO> tickets = new ArrayList<>();
         for (PayRiskAssessRecordDO record : records) {
             PayRiskTermRelatedTicketVO t = new PayRiskTermRelatedTicketVO();
@@ -1399,6 +1434,34 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 resp.setLlmImageContentNarrative(null);
             }
         }
+        return resp;
+    }
+
+    @Override
+    public PayRiskSpeechTranscribeRespVO transcribeSpeech(MultipartFile file) {
+        if (!payRiskGiteeAsrClient.isEnabled()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASR_NOT_ENABLED);
+        }
+        if (file == null || file.isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASR_FILE_EMPTY);
+        }
+        if (file.getSize() > asrMaxFileBytes) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASR_FILE_TOO_LARGE);
+        }
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException ex) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASR_FILE_EMPTY);
+        }
+        String filename = file.getOriginalFilename();
+        String text = payRiskGiteeAsrClient.transcribe(bytes, filename);
+        if (StrUtil.isBlank(text)) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASR_CALL_FAILED);
+        }
+        PayRiskSpeechTranscribeRespVO resp = new PayRiskSpeechTranscribeRespVO();
+        resp.setText(text);
+        resp.setModel(payRiskGiteeAsrClient.getModel());
         return resp;
     }
 

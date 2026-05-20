@@ -7,10 +7,13 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordP
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskSpeechTranscribeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermsRespVO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
+
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.util.Map;
@@ -46,6 +49,11 @@ public interface PayRiskAssessService {
      * 专项：仅对图片 data URL 做 OCR，并可选用 LLM 生成图中文字含义与风险解读（不跑完整支付风险评估）。
      */
     PayRiskImageOcrAnalyzeRespVO analyzeImageOcr(@Valid PayRiskImageOcrAnalyzeReqVO reqVO);
+
+    /**
+     * 语音转文字（Gitee GLM-ASR 等 OpenAI 兼容 /audio/transcriptions 接口）。
+     */
+    PayRiskSpeechTranscribeRespVO transcribeSpeech(MultipartFile file);
 
 }
 

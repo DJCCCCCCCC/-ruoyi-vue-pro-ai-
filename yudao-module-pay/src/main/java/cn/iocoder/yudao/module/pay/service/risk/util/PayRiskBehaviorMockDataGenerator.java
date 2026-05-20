@@ -131,6 +131,7 @@ public class PayRiskBehaviorMockDataGenerator {
         appendIfPresent(builder, paymentData.path("scene").asText(null));
         appendIfPresent(builder, paymentData.path("source").asText(null));
         appendIfPresent(builder, paymentData.path("latestPeerMessage").asText(null));
+        appendIfPresent(builder, paymentData.path("latestVoiceTranscript").asText(null));
         for (String signal : collectDetectedSignals(paymentData)) {
             appendIfPresent(builder, signal);
         }

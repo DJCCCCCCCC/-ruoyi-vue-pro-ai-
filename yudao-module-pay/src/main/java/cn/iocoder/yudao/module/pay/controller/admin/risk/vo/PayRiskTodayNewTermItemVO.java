@@ -9,8 +9,17 @@ import java.util.List;
 @Data
 public class PayRiskTodayNewTermItemVO {
 
+    @Schema(description = "词库编号")
+    private Long termId;
+
     @Schema(description = "风险词（与评估记录 riskFactors 中条目一致）")
     private String term;
+
+    @Schema(description = "来源：MANUAL / AUTO_ASSESS")
+    private String sourceType;
+
+    @Schema(description = "词库累计命中次数")
+    private Long hitCount;
 
     @Schema(description = "今日命中该词的评估工单数")
     private Integer todayHitCount;

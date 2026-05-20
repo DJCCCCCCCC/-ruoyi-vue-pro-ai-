@@ -108,6 +108,10 @@ public class PayRiskAgentReflectionPromptBuilder {
         int idx = 1;
         idx = addEvidence(evidenceList, idx, "BASELINE_SCORE", "硬证据", baseline);
         idx = addEvidence(evidenceList, idx, "PAYMENT_DATA", "硬证据", slimNode(paymentMaskedJsonNode, 6000));
+        JsonNode voiceEvidence = extractVoiceTranscriptEvidence(paymentMaskedJsonNode);
+        if (voiceEvidence != null && voiceEvidence.size() > 0) {
+            idx = addEvidence(evidenceList, idx, "VOICE_TRANSCRIPT", "硬证据", voiceEvidence);
+        }
         idx = addEvidence(evidenceList, idx, "IP_INFO", "硬证据", slimNode(ipInfoMaskedJsonNode, 3000));
         if (behaviorInfo != null && !behaviorInfo.isNull()) {
             idx = addEvidence(evidenceList, idx, "BEHAVIOR", "行为证据", behaviorInfo);
@@ -126,6 +130,35 @@ public class PayRiskAgentReflectionPromptBuilder {
         }
         root.put("instruction", "所有 Agent 只能引用 evidenceList 中的 id，例如 E1/E2。硬证据优先于模型推断，软证据需降低权重。高风险或拦截结论必须说明证据门槛。");
         return root;
+    }
+
+    /**
+     * 从 paymentData 提取语音转写（GLM-ASR 等），供 Dify 反思流单独引用。
+     */
+    private static JsonNode extractVoiceTranscriptEvidence(JsonNode payment) {
+        if (payment == null || !payment.isObject()) {
+            return null;
+        }
+        boolean hasLatest = payment.has("latestVoiceTranscript")
+                && !payment.path("latestVoiceTranscript").asText("").trim().isEmpty();
+        boolean hasList = payment.has("voiceTranscripts") && payment.get("voiceTranscripts").isArray()
+                && payment.get("voiceTranscripts").size() > 0;
+        if (!hasLatest && !hasList) {
+            return null;
+        }
+        ObjectNode out = JsonUtils.getObjectMapper().createObjectNode();
+        if (hasLatest) {
+            out.put("latestVoiceTranscript", payment.path("latestVoiceTranscript").asText(""));
+            out.put("latestVoiceTranscriptRole", payment.path("latestVoiceTranscriptRole").asText(""));
+            if (payment.has("voiceAsrModel")) {
+                out.put("voiceAsrModel", payment.path("voiceAsrModel").asText(""));
+            }
+        }
+        if (hasList) {
+            out.set("voiceTranscripts", payment.get("voiceTranscripts"));
+        }
+        out.put("source", "gitee-glm-asr");
+        return out;
     }
 
     private static int addEvidence(ArrayNode arr, int idx, String type, String reliability, JsonNode content) {

@@ -57,7 +57,7 @@
         <section v-if="chatStore.messages.length === 0" class="welcome-card">
           <h3>这里不是和风控助手对话，而是模拟你和对方的正常聊天。</h3>
           <p>
-            对方可以发付款链接、退款通知、催促转账等；也可点下方「图片」上传截图（后台可先 OCR 再进风控模型）。分析会提交到后台。上方「本人情况」选填，填写后防诈说明会更贴合你的情况。
+            对方可以发付款链接、退款通知、催促转账等。底部可切换「键盘 / 语音」发文字或语音（可播放 + 自动转写）；对方语音会进入风控与 Dify。上方「本人情况」选填。
           </p>
           <div class="welcome-actions">
             <button
@@ -96,6 +96,8 @@
         @analyze="handleAnalyze"
         @reset="restoreDefaultPreset"
         @pick-images="handlePickImages"
+        @voice-error="handleVoiceError"
+        @voice-sent="handleVoiceSent"
       />
     </section>
 
@@ -143,7 +145,14 @@ import RiskResultCompact from '@/components/RiskResultCompact.vue'
 import { useRiskAssess } from '@/composables/useRiskAssess'
 import { riskPresets, type RiskPreset } from '@/constants/presets'
 import { useChatStore } from '@/stores/chat'
-import type { ChatMessage, ChatMessageImage, ChatRole, PayRiskAssessRespVO, RiskLevel } from '@/types'
+import type {
+  ChatMessage,
+  ChatMessageImage,
+  ChatMessageVoice,
+  ChatRole,
+  PayRiskAssessRespVO,
+  RiskLevel
+} from '@/types'
 import { fileToJpegDataUrl } from '@/utils/imageCompress'
 
 const chatStore = useChatStore()
@@ -162,6 +171,11 @@ const userAgeBand = ref('')
 const userPersonality = ref('')
 const userRiskLiteracy = ref('')
 
+/** 本会话语音转写记录，提交 assess 时写入 paymentData，供 Dify 反思流引用 */
+const voiceTranscripts = ref<
+  Array<{ role: Extract<ChatRole, 'self' | 'peer'>; text: string; model?: string; at: string }>
+>([])
+
 const HIGH_RISK_SCORE_THRESHOLD = 65
 const popupRiskLevels: RiskLevel[] = ['HIGH', 'CRITICAL']
 
@@ -178,7 +192,9 @@ const createMessage = (
   type: ChatMessage['type'],
   content: string,
   senderName?: string,
-  images?: ChatMessageImage[]
+  images?: ChatMessageImage[],
+  source?: ChatMessage['source'],
+  voice?: ChatMessageVoice
 ): ChatMessage => {
   const msg: ChatMessage = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -187,8 +203,20 @@ const createMessage = (
     timestamp: new Date(),
     senderName
   }
+  if (source) {
+    msg.source = source
+  }
+  if (voice) {
+    msg.voice = voice
+    if (!msg.source) {
+      msg.source = 'voice_asr'
+    }
+  }
   if (images?.length) {
     msg.images = images
+    if (!msg.source) {
+      msg.source = 'image'
+    }
   }
   return msg
 }
@@ -279,6 +307,7 @@ const applyPreset = (preset: RiskPreset) => {
   lastSubmittedFingerprint.value = ''
   latestRiskResult.value = null
   riskDialogVisible.value = false
+  voiceTranscripts.value = []
   void maybeAutoAnalyze('已识别到预置场景中的高风险信号，自动提交后台分析')
 }
 
@@ -299,6 +328,36 @@ const handleSend = (text: string) => {
 
   if (draftSender.value === 'peer') {
     void maybeAutoAnalyze('检测到对方消息中的高风险信号，已自动提交后台分析')
+  }
+}
+
+const handleVoiceError = (message: string) => {
+  chatStore.addMessage(createMessage('system', message || '语音识别失败'))
+}
+
+const handleVoiceSent = (payload: { text: string; model?: string; voice: ChatMessageVoice }) => {
+  const content = payload.text.trim()
+  if (!content) {
+    return
+  }
+
+  voiceTranscripts.value.push({
+    role: draftSender.value,
+    text: content,
+    model: payload.model,
+    at: new Date().toISOString()
+  })
+
+  const label = draftSender.value === 'peer' ? '对方' : '我'
+  chatStore.addMessage(
+    createMessage(draftSender.value, content, label, undefined, 'voice_asr', payload.voice)
+  )
+  draft.value = ''
+
+  if (draftSender.value === 'peer') {
+    void maybeAutoAnalyze('已发送语音消息并自动提交后台分析（含 Dify 反思流）')
+  } else {
+    chatStore.addMessage(createMessage('system', '已发送语音消息；切换为对方发言后可继续自动分析'))
   }
 }
 
@@ -448,8 +507,25 @@ const buildAnalysisPayload = () => {
       if (message.images?.length) {
         row.imageDataUrls = message.images.map((img) => img.dataUrl)
       }
+      if (message.source) {
+        row.source = message.source
+      }
+      if (message.voice) {
+        row.voiceDurationSec = message.voice.durationSec
+        row.hasVoice = true
+      }
       return row
     })
+  }
+
+  if (voiceTranscripts.value.length > 0) {
+    paymentData.voiceTranscripts = voiceTranscripts.value.map(item => ({ ...item }))
+    const latest = voiceTranscripts.value[voiceTranscripts.value.length - 1]
+    paymentData.latestVoiceTranscript = latest.text
+    paymentData.latestVoiceTranscriptRole = latest.role
+    if (latest.model) {
+      paymentData.voiceAsrModel = latest.model
+    }
   }
 
   const profile: Record<string, string> = {}
@@ -478,6 +554,7 @@ const buildFingerprint = () =>
       role: message.type,
       content: message.content,
       imageSig: message.images?.map((im) => im.dataUrl?.length ?? 0).join(',') ?? '',
+      voiceSig: message.voice ? `${message.voice.durationSec}:${message.content}` : '',
       time: message.timestamp.toISOString()
     }))
   )
@@ -542,6 +619,7 @@ const handleClear = () => {
     lastSubmittedFingerprint.value = ''
     latestRiskResult.value = null
     riskDialogVisible.value = false
+    voiceTranscripts.value = []
     userAgeBand.value = ''
     userPersonality.value = ''
     userRiskLiteracy.value = ''

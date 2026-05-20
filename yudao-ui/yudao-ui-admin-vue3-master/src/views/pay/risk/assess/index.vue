@@ -134,9 +134,12 @@
         <div class="panel-head new-terms-head">
           <div>
             <h3>今日新增风险词</h3>
-            <p>相对历史评估记录首次出现的命中因子；点击可穿透至关联评估工单与沟通过程汇总</p>
+            <p>来自风险词库（首次出现时间为今日）；点击穿透关联工单。可在「风险词库」页人工维护。</p>
           </div>
-          <el-button type="primary" link :loading="newTermsLoading" @click="loadTodayNewTerms">刷新</el-button>
+          <div class="new-terms-actions">
+            <el-button type="primary" link @click="goRiskTermLib">词库管理</el-button>
+            <el-button type="primary" link :loading="newTermsLoading" @click="loadTodayNewTerms">刷新</el-button>
+          </div>
         </div>
         <div v-loading="newTermsLoading" class="new-terms-body">
           <el-empty v-if="!newTermsLoading && newTermsList.length === 0" description="今日暂无新增风险词" />
@@ -353,6 +356,7 @@
 import * as echarts from 'echarts'
 import worldGeoJson from '@/assets/world.geo.json'
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { dateFormatter } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
@@ -375,6 +379,8 @@ import {
 } from '@/api/pay/risk/assess'
 
 defineOptions({ name: 'PayRiskAssess' })
+
+const router = useRouter()
 
 const DEFAULT_ASSESS_PAYMENT_JSON = `{
   "scene": "ADMIN_DESK_RISK",
@@ -872,6 +878,10 @@ const loadTodayNewTerms = async () => {
   }
 }
 
+const goRiskTermLib = () => {
+  router.push({ name: 'PayRiskTerm' })
+}
+
 const openTodayNewTermDetail = async (term: string) => {
   newTermDrawerTitle.value = `今日新增风险词：${term}`
   newTermDrawerVisible.value = true
@@ -1331,6 +1341,13 @@ onBeforeUnmount(() => {
 
 .new-terms-head {
   align-items: center;
+}
+
+.new-terms-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .new-terms-body {

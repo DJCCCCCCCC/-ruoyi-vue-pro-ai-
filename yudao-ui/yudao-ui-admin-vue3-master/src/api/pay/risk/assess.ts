@@ -249,7 +249,10 @@ export interface PayRiskAssessRecordPageReqVO {
 }
 
 export interface PayRiskTodayNewTermItem {
+  termId?: number
   term: string
+  sourceType?: string
+  hitCount?: number
   todayHitCount: number
   relatedRecordIds: number[]
 }

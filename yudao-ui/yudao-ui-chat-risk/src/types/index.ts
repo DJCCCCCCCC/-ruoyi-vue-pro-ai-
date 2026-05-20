@@ -154,12 +154,23 @@ export interface ChatMessageImage {
   dataUrl: string
 }
 
+/** 语音消息（本地录音 data URL，可播放；转写文字在 content） */
+export interface ChatMessageVoice {
+  mime: string
+  dataUrl: string
+  durationSec: number
+}
+
 export interface ChatMessage {
   id: string
   type: ChatRole
   content: string
   timestamp: Date
   senderName?: string
+  /** 消息来源，提交 assess 时写入 paymentData.messages[].source */
+  source?: 'voice_asr' | 'text' | 'image'
+  /** 语音条，与 content（转写）一起展示 */
+  voice?: ChatMessageVoice
   /** 与文字同气泡展示；提交分析时会写入 paymentData.messages[].imageDataUrls */
   images?: ChatMessageImage[]
 }
