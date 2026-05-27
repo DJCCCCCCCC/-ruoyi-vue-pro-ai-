@@ -143,17 +143,27 @@
         </div>
         <div v-loading="newTermsLoading" class="new-terms-body">
           <el-empty v-if="!newTermsLoading && newTermsList.length === 0" description="今日暂无新增风险词" />
-          <div v-else class="new-terms-chips">
-            <button
-              v-for="item in newTermsList"
-              :key="item.term"
-              type="button"
-              class="new-term-chip"
-              @click="openTodayNewTermDetail(item.term)"
-            >
-              <span class="new-term-text">{{ item.term }}</span>
-              <span class="new-term-count">{{ item.todayHitCount }} 单</span>
-            </button>
+          <div v-else>
+            <div class="new-terms-chips" :class="{ 'is-collapsed': !newTermsExpanded }">
+              <button
+                v-for="item in displayedNewTermsList"
+                :key="item.term"
+                type="button"
+                class="new-term-chip"
+                @click="openTodayNewTermDetail(item.term)"
+              >
+                <span class="new-term-text">{{ item.term }}</span>
+                <span class="new-term-count">{{ item.todayHitCount }} 单</span>
+              </button>
+            </div>
+            <div v-if="newTermsList.length > NEW_TERMS_COLLAPSE_LIMIT" class="new-terms-expand-bar">
+              <span v-if="!newTermsExpanded" class="new-terms-summary">
+                已显示前 {{ NEW_TERMS_COLLAPSE_LIMIT }} 个，共 {{ newTermsList.length }} 个
+              </span>
+              <el-button type="primary" link @click="newTermsExpanded = !newTermsExpanded">
+                {{ newTermsExpanded ? '收起' : `展开全部（${newTermsList.length}）` }}
+              </el-button>
+            </div>
           </div>
         </div>
       </ContentWrap>
@@ -437,8 +447,13 @@ const reviewForm = reactive({
   remark: ''
 })
 
+const NEW_TERMS_COLLAPSE_LIMIT = 16
 const newTermsLoading = ref(false)
+const newTermsExpanded = ref(false)
 const newTermsList = ref<Array<{ term: string; todayHitCount: number; relatedRecordIds: number[] }>>([])
+const displayedNewTermsList = computed(() =>
+  newTermsExpanded.value ? newTermsList.value : newTermsList.value.slice(0, NEW_TERMS_COLLAPSE_LIMIT)
+)
 const newTermDrawerVisible = ref(false)
 const newTermDrawerTitle = ref('今日新增风险词')
 const newTermDetailLoading = ref(false)
@@ -870,8 +885,10 @@ const loadTodayNewTerms = async () => {
   try {
     const res = await getPayRiskTodayNewTerms()
     newTermsList.value = res.terms || []
+    newTermsExpanded.value = false
   } catch (e: unknown) {
     newTermsList.value = []
+    newTermsExpanded.value = false
     message.error(e instanceof Error ? e.message : '加载今日新增风险词失败')
   } finally {
     newTermsLoading.value = false
@@ -1358,6 +1375,26 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.new-terms-chips.is-collapsed {
+  max-height: 92px;
+  overflow: hidden;
+}
+
+.new-terms-expand-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(79, 135, 255, 0.22);
+}
+
+.new-terms-summary {
+  color: #7a8ba6;
+  font-size: 12px;
 }
 
 .new-term-chip {

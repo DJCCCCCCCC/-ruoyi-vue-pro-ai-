@@ -25,49 +25,49 @@ import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionU
 @Slf4j
 public class DeepSeekClient {
 
-    @Value("${spring.ai.deepseek.api-key:}")
-    private String deepseekApiKey;
+    @Value("${spring.ai.dashscope.api-key:}")
+    private String qwenApiKey;
 
-    @Value("${yudao.pay.risk-assess.deepseek.base-url:https://api.deepseek.com}")
+    @Value("${yudao.pay.risk-assess.qwen.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}")
     private String baseUrl;
 
-    @Value("${yudao.pay.risk-assess.deepseek.model:deepseek-chat}")
+    @Value("${yudao.pay.risk-assess.qwen.model:qwen-plus}")
     private String model;
 
-    @Value("${yudao.pay.risk-assess.deepseek.temperature:0.2}")
+    @Value("${yudao.pay.risk-assess.qwen.temperature:0.2}")
     private Double temperature;
 
-    @Value("${yudao.pay.risk-assess.deepseek.max-tokens:800}")
+    @Value("${yudao.pay.risk-assess.qwen.max-tokens:800}")
     private Integer maxTokens;
 
     /** 首次评分：略收紧输出长度，加快生成与后续二次调用的输入体积 */
-    @Value("${yudao.pay.risk-assess.deepseek.assess-max-tokens:512}")
+    @Value("${yudao.pay.risk-assess.qwen.assess-max-tokens:512}")
     private Integer assessMaxTokens;
 
     /** 综合研判报告：含 personaProfile + tailoredUserGuidance，需足够 token 避免 JSON 截断 */
-    @Value("${yudao.pay.risk-assess.deepseek.report-max-tokens:2048}")
+    @Value("${yudao.pay.risk-assess.qwen.report-max-tokens:2048}")
     private Integer reportMaxTokens;
 
     /** Agentic 反思流：单个 Agent 的 JSON 输出长度 */
-    @Value("${yudao.pay.risk-assess.deepseek.agent-max-tokens:900}")
+    @Value("${yudao.pay.risk-assess.qwen.agent-max-tokens:900}")
     private Integer agentMaxTokens;
 
     @Value("${yudao.pay.risk-assess.http-timeout-millis:20000}")
     private Integer timeoutMillis;
 
     /** 图片 OCR 专项解读：纯文本输出，非 JSON */
-    @Value("${yudao.pay.risk-assess.deepseek.image-ocr-narrative-max-tokens:640}")
+    @Value("${yudao.pay.risk-assess.qwen.image-ocr-narrative-max-tokens:640}")
     private Integer imageOcrNarrativeMaxTokens;
 
     public PayRiskAssessAiResponse assess(String paymentMaskedJson, String ipInfoMaskedJson) {
-        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+        if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
         }
 
         String userPrompt = PayRiskPromptBuilder.buildUserPrompt(paymentMaskedJson, ipInfoMaskedJson);
         String url = baseUrl + "/chat/completions";
 
-        // DeepSeek 默认兼容 OpenAI：使用 Authorization: Bearer xxx
+        // Qwen DashScope 兼容 OpenAI：使用 Authorization: Bearer xxx
         int cap = assessMaxTokens != null && assessMaxTokens > 0 ? assessMaxTokens : maxTokens;
         Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskPromptBuilder.SYSTEM_PROMPT, true, cap);
         try {
@@ -81,7 +81,7 @@ public class DeepSeekClient {
     }
 
     public PayRiskLlmAnalysisReport generateRiskReport(String contextJson) {
-        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+        if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
         }
 
@@ -129,7 +129,7 @@ public class DeepSeekClient {
      * 根据 OCR 合并文本，用自然语言概括图中文字可能涉及的支付/诈骗场景与风险点（不返回 JSON）。
      */
     public String analyzeImageOcrNarrative(String ocrMergedText) {
-        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+        if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
             return null;
         }
         if (ocrMergedText == null || ocrMergedText.trim().isEmpty()) {
@@ -170,7 +170,7 @@ public class DeepSeekClient {
     }
 
     private <T> T doAgenticJsonCall(String userPrompt, String systemPrompt, Class<T> resultType, String agentName) {
-        if (deepseekApiKey == null || deepseekApiKey.trim().isEmpty()) {
+        if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
         }
         String url = baseUrl + "/chat/completions";
@@ -187,7 +187,7 @@ public class DeepSeekClient {
 
     private String doCallPlainText(String url, Map<String, Object> reqBody) {
         try (HttpResponse response = HttpUtil.createPost(url)
-                .header("Authorization", "Bearer " + deepseekApiKey)
+                .header("Authorization", "Bearer " + qwenApiKey)
                 .header("Content-Type", "application/json")
                 .timeout(timeoutMillis)
                 .body(JsonUtils.toJsonString(reqBody))
@@ -205,14 +205,14 @@ public class DeepSeekClient {
             }
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, body);
         } catch (Exception e) {
-            log.error("[DeepSeekClient][doCallPlainText] 调用 DeepSeek 失败", e);
+            log.error("[DeepSeekClient][doCallPlainText] 调用 Qwen 失败", e);
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, e.getMessage());
         }
     }
 
     private <T> T doCall(String url, Map<String, Object> reqBody, Class<T> resultType) {
         try (HttpResponse response = HttpUtil.createPost(url)
-                .header("Authorization", "Bearer " + deepseekApiKey)
+                .header("Authorization", "Bearer " + qwenApiKey)
                 .header("Content-Type", "application/json")
                 .timeout(timeoutMillis)
                 .body(JsonUtils.toJsonString(reqBody))
@@ -249,7 +249,7 @@ public class DeepSeekClient {
             }
             return result;
         } catch (Exception e) {
-            log.error("[DeepSeekClient][doCall] 调用 DeepSeek 失败", e);
+            log.error("[DeepSeekClient][doCall] 调用 Qwen 失败", e);
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_CALL_FAILED, e.getMessage());
         }
     }

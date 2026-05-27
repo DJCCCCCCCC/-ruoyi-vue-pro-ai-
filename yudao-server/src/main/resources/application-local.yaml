@@ -86,10 +86,17 @@ spring:
     database: 0 # 数据库索引
 #    password: dev # 密码，建议生产环境开启
 
-  # DeepSeek 配置（用于支付风险评估接口）
+  # Qwen 配置（用于支付风险评估接口，DashScope OpenAI 兼容模式）
   ai:
-    deepseek:
-      api-key: "sk-5130cca66b03403dbad8d91a9e7c034c"
+    dashscope:
+      api-key: "sk-c5b17cf42c594bc5a5d88ed11480538e"
+
+yudao:
+  pay:
+    risk-assess:
+      qwen:
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        model: qwen-plus
 
 --- #################### 定时任务相关配置 ####################
 

@@ -3,10 +3,13 @@ package cn.iocoder.yudao.module.pay.service.risk;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.enums.CommonStatusEnum;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermPageReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermSaveReqVO;
+import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskAssessRecordDO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskTermDO;
 import cn.iocoder.yudao.module.pay.dal.dataobject.risk.PayRiskTermHitDO;
+import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskAssessRecordMapper;
 import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskTermHitMapper;
 import cn.iocoder.yudao.module.pay.dal.mysql.risk.PayRiskTermMapper;
 import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
@@ -31,6 +34,9 @@ public class PayRiskTermServiceImpl implements PayRiskTermService {
 
     @Resource
     private PayRiskTermHitMapper payRiskTermHitMapper;
+
+    @Resource
+    private PayRiskAssessRecordMapper payRiskAssessRecordMapper;
 
     @Override
     public Long createTerm(@Valid PayRiskTermSaveReqVO reqVO) {
@@ -85,6 +91,7 @@ public class PayRiskTermServiceImpl implements PayRiskTermService {
 
     @Override
     public PageResult<PayRiskTermDO> getTermPage(PayRiskTermPageReqVO pageReqVO) {
+        backfillTermsFromRecentAssessRecords();
         return payRiskTermMapper.selectPage(pageReqVO);
     }
 
@@ -142,6 +149,28 @@ public class PayRiskTermServiceImpl implements PayRiskTermService {
         hit.setTermId(termId);
         hit.setRecordId(recordId);
         payRiskTermHitMapper.insert(hit);
+    }
+
+    private void backfillTermsFromRecentAssessRecords() {
+        if (payRiskTermMapper.selectCount() > 0) {
+            return;
+        }
+        for (PayRiskAssessRecordDO record : payRiskAssessRecordMapper.selectRecentRiskFactors(50)) {
+            List<String> factors = parseRiskFactors(record.getRiskFactorsJson());
+            syncFactorsFromAssess(factors, record.getId());
+        }
+    }
+
+    private static List<String> parseRiskFactors(String json) {
+        if (StrUtil.isBlank(json)) {
+            return Collections.emptyList();
+        }
+        try {
+            List<String> factors = JsonUtils.parseArray(json, String.class);
+            return factors == null ? Collections.emptyList() : factors;
+        } catch (Exception ex) {
+            return Collections.emptyList();
+        }
     }
 
     @Override

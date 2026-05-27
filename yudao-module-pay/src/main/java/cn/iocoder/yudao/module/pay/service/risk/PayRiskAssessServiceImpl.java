@@ -794,7 +794,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                             : PayRiskReviewStatusConstants.NOT_REQUIRED);
                 }
                 payRiskAssessRecordMapper.updateById(update);
-                log.info("[submitAgentReflectionAsync] Agentic 反思流已异步回写，recordId={}", recordId);
+                payRiskTermService.syncFactorsFromAssess(snapshot.getRiskFactors(), recordId);
+                log.info("[submitAgentReflectionAsync] Agentic 反思流已异步回写并同步风险词库，recordId={}", recordId);
             } catch (Exception ex) {
                 log.warn("[submitAgentReflectionAsync] Agentic 反思流异步回写失败，recordId={}, error={}",
                         recordId, ex.getMessage(), ex);
@@ -1224,21 +1225,41 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     @Override
     public PayRiskTodayNewTermsRespVO getTodayNewRiskTerms() {
         LocalDateTime[] range = resolveLocalTodayRange();
+        Map<String, PayRiskTodayNewTermItemVO> itemMap = new LinkedHashMap<>();
+
+        payRiskTermService.listTodayNewTerms(range[0], range[1]).forEach(termRow -> {
+            PayRiskTodayNewTermItemVO vo = new PayRiskTodayNewTermItemVO();
+            vo.setTerm(termRow.getTerm());
+            List<Long> recordIds = payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]);
+            int todayHits = payRiskTermService.countTodayHits(termRow.getId(), range[0], range[1]);
+            vo.setTodayHitCount(todayHits > 0 ? todayHits : Math.max(recordIds.size(), 1));
+            vo.setRelatedRecordIds(recordIds);
+            vo.setTermId(termRow.getId());
+            vo.setSourceType(termRow.getSourceType());
+            vo.setHitCount(termRow.getHitCount());
+            itemMap.put(termRow.getTerm(), vo);
+        });
+
+        // 兜底：直接从评估记录 riskFactorsJson 回算“今日新增”。避免词库同步失败、异步回写或时间字段异常导致驾驶舱为空。
+        Map<String, LinkedHashSet<Long>> recordComputed = computeTodayNewTermToRecordIds(range[0], range[1]);
+        mergeComputedTodayNewTerms(itemMap, recordComputed);
+
+        // 再兜底：如果本地自然日没有命中，按最近 24 小时回算，规避数据库/JVM/容器时区不一致导致 create_time 不在“本地今天”的问题。
+        if (itemMap.isEmpty()) {
+            LocalDateTime now = LocalDateTime.now();
+            Map<String, LinkedHashSet<Long>> rollingComputed = computeTodayNewTermToRecordIds(now.minusHours(24), now.plusMinutes(1));
+            mergeComputedTodayNewTerms(itemMap, rollingComputed);
+        }
+
+        // 最后兜底：展示最近评估记录中的风险因子。这样即使“新增”判定被历史记录抵消，也不会让驾驶舱空白。
+        if (itemMap.isEmpty()) {
+            mergeComputedTodayNewTerms(itemMap, computeRecentRiskTermToRecordIds());
+        }
+
         PayRiskTodayNewTermsRespVO resp = new PayRiskTodayNewTermsRespVO();
-        List<PayRiskTodayNewTermItemVO> items = payRiskTermService.listTodayNewTerms(range[0], range[1]).stream()
-                .map(termRow -> {
-                    PayRiskTodayNewTermItemVO vo = new PayRiskTodayNewTermItemVO();
-                    vo.setTerm(termRow.getTerm());
-                    List<Long> recordIds = payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]);
-                    int todayHits = payRiskTermService.countTodayHits(termRow.getId(), range[0], range[1]);
-                    vo.setTodayHitCount(todayHits > 0 ? todayHits : 1);
-                    vo.setRelatedRecordIds(recordIds);
-                    vo.setTermId(termRow.getId());
-                    vo.setSourceType(termRow.getSourceType());
-                    vo.setHitCount(termRow.getHitCount());
-                    return vo;
-                })
-                .sorted(Comparator.comparing(PayRiskTodayNewTermItemVO::getTodayHitCount).reversed()
+        List<PayRiskTodayNewTermItemVO> items = itemMap.values().stream()
+                .sorted(Comparator.comparing(PayRiskTodayNewTermItemVO::getTodayHitCount,
+                                Comparator.nullsLast(Integer::compareTo)).reversed()
                         .thenComparing(PayRiskTodayNewTermItemVO::getTerm, Comparator.nullsLast(String::compareTo)))
                 .collect(Collectors.toList());
         resp.setTerms(items);
@@ -1253,15 +1274,20 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         }
         LocalDateTime[] range = resolveLocalTodayRange();
         PayRiskTermDO termRow = payRiskTermService.getTermByText(term);
-        if (termRow == null || termRow.getFirstSeenTime() == null
-                || termRow.getFirstSeenTime().isBefore(range[0])
-                || !termRow.getFirstSeenTime().isBefore(range[1])) {
-            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW);
+        List<Long> matchedIds = new ArrayList<>();
+        if (termRow != null && termRow.getFirstSeenTime() != null
+                && !termRow.getFirstSeenTime().isBefore(range[0])
+                && termRow.getFirstSeenTime().isBefore(range[1])) {
+            matchedIds.addAll(payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]));
+            if (matchedIds.isEmpty() && termRow.getFirstRecordId() != null) {
+                matchedIds.add(termRow.getFirstRecordId());
+            }
         }
-        List<Long> matchedIds = payRiskTermService.listTodayHitRecordIds(termRow.getId(), range[0], range[1]);
-        if (matchedIds.isEmpty() && termRow.getFirstRecordId() != null) {
-            matchedIds = Collections.singletonList(termRow.getFirstRecordId());
+        LinkedHashSet<Long> recordComputedIds = computeTodayNewTermToRecordIds(range[0], range[1]).get(term);
+        if (recordComputedIds != null) {
+            matchedIds.addAll(recordComputedIds);
         }
+        matchedIds = matchedIds.stream().distinct().collect(Collectors.toList());
         if (matchedIds.isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_TERM_NOT_TODAY_NEW);
         }
@@ -1290,6 +1316,26 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return new LocalDateTime[]{dayStart, dayStart.plusDays(1)};
     }
 
+    private void mergeComputedTodayNewTerms(Map<String, PayRiskTodayNewTermItemVO> itemMap,
+                                            Map<String, LinkedHashSet<Long>> computed) {
+        computed.forEach((term, recordIds) -> {
+            PayRiskTodayNewTermItemVO vo = itemMap.computeIfAbsent(term, k -> {
+                PayRiskTodayNewTermItemVO created = new PayRiskTodayNewTermItemVO();
+                created.setTerm(k);
+                created.setSourceType(PayRiskTermConstants.SOURCE_AUTO);
+                created.setHitCount((long) recordIds.size());
+                return created;
+            });
+            LinkedHashSet<Long> mergedIds = new LinkedHashSet<>();
+            if (vo.getRelatedRecordIds() != null) {
+                mergedIds.addAll(vo.getRelatedRecordIds());
+            }
+            mergedIds.addAll(recordIds);
+            vo.setRelatedRecordIds(new ArrayList<>(mergedIds));
+            vo.setTodayHitCount(Math.max(vo.getTodayHitCount() == null ? 0 : vo.getTodayHitCount(), mergedIds.size()));
+        });
+    }
+
     private Map<String, LinkedHashSet<Long>> computeTodayNewTermToRecordIds(LocalDateTime dayStartInclusive,
                                                                             LocalDateTime dayEndExclusive) {
         Set<String> historical = new HashSet<>();
@@ -1306,6 +1352,20 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                 if (!historical.contains(factor)) {
                     termToIds.computeIfAbsent(factor, k -> new LinkedHashSet<>()).add(id);
                 }
+            }
+        }
+        return termToIds;
+    }
+
+    private Map<String, LinkedHashSet<Long>> computeRecentRiskTermToRecordIds() {
+        Map<String, LinkedHashSet<Long>> termToIds = new LinkedHashMap<>();
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectRecentRiskFactors(10)) {
+            Long id = row.getId();
+            if (id == null) {
+                continue;
+            }
+            for (String factor : parseRiskFactorStrings(row.getRiskFactorsJson())) {
+                termToIds.computeIfAbsent(factor, k -> new LinkedHashSet<>()).add(id);
             }
         }
         return termToIds;

@@ -72,6 +72,15 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
                 .orderByDesc(PayRiskAssessRecordDO::getId));
     }
 
+    default List<PayRiskAssessRecordDO> selectRecentRiskFactors(int limit) {
+        int safeLimit = limit <= 0 ? 10 : Math.min(limit, 100);
+        return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
+                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getRiskFactorsJson)
+                .isNotNull(PayRiskAssessRecordDO::getRiskFactorsJson)
+                .orderByDesc(PayRiskAssessRecordDO::getId)
+                .last("LIMIT " + safeLimit));
+    }
+
     /**
      * 历史案例相似度候选集：只取最近的高风险/需复核记录，避免历史表增长后全量扫描。
      */

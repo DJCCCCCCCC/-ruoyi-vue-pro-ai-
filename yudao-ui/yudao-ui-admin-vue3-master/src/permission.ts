@@ -56,13 +56,15 @@ const whiteList = [
   '/oauthLogin/gitee'
 ]
 
+const defaultLoginRedirect = '/pay/risk/assess'
+
 // 路由加载前
 router.beforeEach(async (to, from, next) => {
   start()
   loadStart()
   if (getAccessToken()) {
     if (to.path === '/login') {
-      next({ path: '/' })
+      next({ path: defaultLoginRedirect })
     } else {
       const dictStore = useDictStoreWithOut()
       const userStore = useUserStoreWithOut()
@@ -82,10 +84,11 @@ router.beforeEach(async (to, from, next) => {
           router.addRoute(route as unknown as RouteRecordRaw) // 动态添加可访问路由表
         })
         const redirectPath = from.query.redirect || to.path
-        // 修复跳转时不带参数的问题
+        // 修复跳转时不带参数的问题；登录后访问根路径时，直接进入支付风险评估页
         const redirect = decodeURIComponent(redirectPath as string)
-        const { paramsObject: query } = parseURL(redirect)
-        const nextData = to.path === redirect ? { ...to, replace: true } : { path: redirect, query }
+        const targetPath = redirect === '/' || redirect === '/index' || redirect === '/pay/risk/assess/index' ? defaultLoginRedirect : redirect
+        const { paramsObject: query } = parseURL(targetPath)
+        const nextData = to.path === targetPath ? { ...to, replace: true } : { path: targetPath, query }
         next(nextData)
       } else {
         next()

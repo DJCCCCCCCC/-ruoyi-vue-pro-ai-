@@ -53,9 +53,12 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
-    redirect: '/index',
+    redirect: '/pay/risk/assess',
     name: 'Home',
-    meta: {},
+    meta: {
+      hidden: true,
+      noTagsView: true
+    },
     children: [
       {
         path: 'index',
@@ -65,7 +68,34 @@ const remainingRouter: AppRouteRecordRaw[] = [
           title: t('router.home'),
           icon: 'ep:home-filled',
           noCache: false,
-          affix: true
+          hidden: true,
+          noTagsView: true,
+          affix: false
+        }
+      }
+    ]
+  },
+  {
+    path: '/pay/risk',
+    component: Layout,
+    name: 'PayRisk',
+    redirect: '/pay/risk/assess',
+    meta: {
+      hidden: true,
+      noTagsView: true
+    },
+    children: [
+      {
+        path: 'assess',
+        component: () => import('@/views/pay/risk/assess/index.vue'),
+        name: 'PayRiskAssessStatic',
+        meta: {
+          title: '支付风险评估',
+          icon: 'ep:warning',
+          noCache: false,
+          affix: true,
+          canTo: true,
+          activeMenu: '/pay/risk/assess'
         }
       }
     ]
