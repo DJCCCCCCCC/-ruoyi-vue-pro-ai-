@@ -1,20 +1,16 @@
 <template>
   <ContentWrap v-if="reflection" class="panel reflection-panel">
-    <div class="panel-head">
-      <div>
-        <p class="panel-kicker">Agentic Reflection</p>
-        <h3>三 Agent 反思流</h3>
-        <p class="panel-desc">判定 Agent 给出初判，质疑 Agent 专门找漏洞，仲裁 Agent 基于证据输出最终结论。</p>
-      </div>
-      <el-tag v-if="reflection.arbiter?.disputeLevel" :type="disputeTagType(reflection.arbiter.disputeLevel)">
-        争议度 {{ reflection.arbiter.disputeLevel }}
+    <div class="panel-head reflection-head">
+      <h3 class="section-title-only">Agent 校验</h3>
+      <el-tag v-if="reflection.arbiter?.disputeLevel" size="small" :type="disputeTagType(reflection.arbiter.disputeLevel)">
+        争议 {{ reflection.arbiter.disputeLevel }}
       </el-tag>
     </div>
 
     <div class="reflection-grid">
       <article class="agent-card assessor-card">
         <div class="agent-head">
-          <span>判定 Agent</span>
+          <span>判定</span>
           <strong>{{ reflection.assessor?.preliminaryScore ?? '-' }}/100</strong>
         </div>
         <p class="agent-meta">
@@ -32,7 +28,7 @@
 
       <article class="agent-card skeptic-card">
         <div class="agent-head">
-          <span>质疑 Agent</span>
+          <span>质疑</span>
           <strong>{{ percent(reflection.skeptic?.overallChallengeStrength) }}</strong>
         </div>
         <p class="agent-meta">建议修正分：{{ reflection.skeptic?.revisedScoreSuggestion ?? '-' }}</p>
@@ -51,15 +47,15 @@
 
       <article class="agent-card arbiter-card">
         <div class="agent-head">
-          <span>仲裁 Agent</span>
+          <span>仲裁</span>
           <strong>{{ reflection.arbiter?.finalScore ?? '-' }}/100</strong>
         </div>
         <p class="agent-meta">
           {{ reflection.arbiter?.finalRiskLevel || '-' }} · {{ reflection.arbiter?.finalDecision || '-' }} · 置信度 {{ percent(reflection.arbiter?.confidence) }}
         </p>
-        <p class="arbiter-summary">{{ reflection.arbiter?.summary || '暂无仲裁摘要' }}</p>
+        <p class="arbiter-summary">{{ reflection.arbiter?.summary || '—' }}</p>
         <div v-if="reflection.arbiter?.manualReviewFocus?.length" class="focus-box">
-          <span>人工复核重点</span>
+          <span>复核要点</span>
           <ul>
             <li v-for="item in reflection.arbiter.manualReviewFocus" :key="item">{{ item }}</li>
           </ul>
@@ -130,11 +126,15 @@ const severityTagType = (level?: string) => {
     linear-gradient(180deg, #ffffff 0%, #fbf8ff 100%);
 }
 
-.panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.section-title-only {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #12202f;
+}
+
+.reflection-head {
+  margin-bottom: 10px;
 }
 
 .panel-kicker {

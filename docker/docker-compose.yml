@@ -1,0 +1,101 @@
+name: ai-pay-risk
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ai-pay-risk-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ruoyi-vue-pro}
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../sql/mysql/ruoyi-vue-pro.sql:/docker-entrypoint-initdb.d/01-ruoyi.sql:ro
+      - ./mysql/init/02-pay-risk.sql:/docker-entrypoint-initdb.d/02-pay-risk.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-pay-risk-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+    image: ai-pay-risk-server
+    container_name: ai-pay-risk-server
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ruoyi-vue-pro}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JAVA_OPTS: ${JAVA_OPTS:--Xms512m -Xmx768m}
+      SPRING_AI_DASHSCOPE_API_KEY: ${SPRING_AI_DASHSCOPE_API_KEY:-}
+      YUDAO_PAY_RISK_ASSESS_IPINFO_TOKEN: ${YUDAO_PAY_RISK_ASSESS_IPINFO_TOKEN:-}
+      YUDAO_PAY_RISK_ASSESS_WHOISXML_API_KEY: ${YUDAO_PAY_RISK_ASSESS_WHOISXML_API_KEY:-}
+      YUDAO_PAY_RISK_ASSESS_OCR_ENABLED: ${YUDAO_PAY_RISK_ASSESS_OCR_ENABLED:-false}
+      YUDAO_PAY_RISK_ASSESS_OCR_API_KEY: ${YUDAO_PAY_RISK_ASSESS_OCR_API_KEY:-}
+      YUDAO_PAY_RISK_ASSESS_ASR_ENABLED: ${YUDAO_PAY_RISK_ASSESS_ASR_ENABLED:-false}
+      YUDAO_PAY_RISK_ASSESS_ASR_API_KEY: ${YUDAO_PAY_RISK_ASSESS_ASR_API_KEY:-}
+    ports:
+      - "48080:48080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: ..
+      dockerfile: docker/admin/Dockerfile
+    image: ai-pay-risk-admin
+    container_name: ai-pay-risk-admin
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+
+  chat:
+    build:
+      context: ..
+      dockerfile: docker/chat-risk/Dockerfile
+    image: ai-pay-risk-chat
+    container_name: ai-pay-risk-chat
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+
+volumes:
+  mysql_data:
+  redis_data:

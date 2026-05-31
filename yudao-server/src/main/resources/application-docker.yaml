@@ -1,0 +1,88 @@
+server:
+  port: 48080
+
+--- #################### 数据库相关配置 ####################
+
+spring:
+  autoconfigure:
+    exclude:
+      - com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure
+      - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration
+      - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration
+      - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration
+  datasource:
+    druid:
+      web-stat-filter:
+        enabled: false
+      stat-view-servlet:
+        enabled: false
+    dynamic:
+      druid:
+        initial-size: 2
+        min-idle: 2
+        max-active: 20
+      primary: master
+      datasource:
+        master:
+          url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ruoyi-vue-pro}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:123456}
+        slave:
+          lazy: true
+          url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ruoyi-vue-pro}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:123456}
+  redis:
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    database: ${REDIS_DATABASE:0}
+  ai:
+    dashscope:
+      api-key: ${SPRING_AI_DASHSCOPE_API_KEY:}
+
+yudao:
+  captcha:
+    enable: false
+  security:
+    mock-enable: true
+  pay:
+    risk-assess:
+      qwen:
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        model: qwen-plus
+        temperature: 0.2
+        assess-max-tokens: 512
+        report-max-tokens: 2048
+      ipinfo:
+        token: ${YUDAO_PAY_RISK_ASSESS_IPINFO_TOKEN:}
+        cache-enabled: true
+        cache-ttl-millis: 259200000
+      whoisxml:
+        api-key: ${YUDAO_PAY_RISK_ASSESS_WHOISXML_API_KEY:}
+        cache-enabled: true
+        cache-ttl-millis: 2592000000
+      deepseek:
+        model: deepseek-chat
+        temperature: 0.2
+      agent-reflection:
+        provider: deepseek
+        async: true
+        fallback-to-deepseek: true
+      ocr:
+        enabled: ${YUDAO_PAY_RISK_ASSESS_OCR_ENABLED:false}
+        api-key: ${YUDAO_PAY_RISK_ASSESS_OCR_API_KEY:}
+      asr:
+        enabled: ${YUDAO_PAY_RISK_ASSESS_ASR_ENABLED:false}
+        api-key: ${YUDAO_PAY_RISK_ASSESS_ASR_API_KEY:}
+  access-log:
+    enable: false
+  demo: false
+  devtools:
+    browser:
+      enabled: false
+
+logging:
+  level:
+    cn.iocoder.yudao.module.pay: info
+    cn.iocoder.yudao.module.system: info
+    root: info

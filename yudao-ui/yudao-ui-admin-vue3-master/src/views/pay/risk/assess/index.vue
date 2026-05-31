@@ -1,234 +1,22 @@
 <template>
   <div class="risk-assess-page">
-    <section class="hero">
-      <div class="hero-left">
-        <p class="hero-kicker">支付风控工作台</p>
-        <h1>风险评估中心</h1>
-        <p class="hero-desc">
-          聚焦结果查看与审计追踪。支持从历史记录快速回看评分、因子、情报与拓扑分析。
-        </p>
-
-      </div>
+    <section class="hero hero-compact">
+      <h1>AI 支付风险检测</h1>
     </section>
 
-    <ContentWrap class="panel invoke-assess-panel">
-      <div class="panel-head invoke-head">
-        <div>
-          <h3>发起评估（调试）</h3>
-          <p>提交到与 App 相同的评估接口；可选「本人情况」会写入 paymentData.userProfile，供 LLM 生成个性化防诈说明。</p>
-        </div>
-      </div>
-      <el-form label-width="100px" class="invoke-form">
-        <el-form-item label="客户端 IP">
-          <el-input v-model="assessIp" placeholder="用于 IP 情报，如 8.8.8.8" clearable style="max-width: 320px" />
-        </el-form-item>
-        <el-form-item label="本人情况">
-          <div class="profile-inline">
-            <el-select v-model="userAgeBand" placeholder="年龄段" clearable style="width: 160px">
-              <el-option label="未成年" value="UNDER_18" />
-              <el-option label="青年" value="YOUNG_ADULT" />
-              <el-option label="中年" value="MIDDLE_AGED" />
-              <el-option label="中老年" value="SENIOR" />
-            </el-select>
-            <el-select v-model="userPersonality" placeholder="个性倾向" clearable style="width: 200px">
-              <el-option label="偏焦虑 / 易紧张" value="ANXIOUS" />
-              <el-option label="偏谨慎" value="CAUTIOUS" />
-              <el-option label="对手机网银不熟" value="DIGITAL_NOVICE" />
-              <el-option label="较信「官方/警察」口吻" value="AUTHORITY_TRUSTING" />
-              <el-option label="容易匆忙做决定" value="IMPULSIVE" />
-            </el-select>
-            <el-select v-model="userRiskLiteracy" placeholder="防诈了解" clearable style="width: 140px">
-              <el-option label="较少了解" value="LOW" />
-              <el-option label="一般" value="MEDIUM" />
-              <el-option label="较熟悉" value="HIGH" />
-            </el-select>
-          </div>
-        </el-form-item>
-        <el-form-item label="paymentData">
-          <el-input
-            v-model="assessPaymentJson"
-            type="textarea"
-            :rows="14"
-            class="json-textarea"
-            placeholder="JSON"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="assessSubmitting" @click="handleInvokeAssess">提交评估</el-button>
-        </el-form-item>
-      </el-form>
-    </ContentWrap>
-
-    <ImageContentAnalysisPanel :payment-data="selectedPaymentObject" :record-id="selectedRecord?.id ?? null" />
-
-    <section class="overview-grid">
-      <ContentWrap class="panel metric-card">
-        <span>风险评分</span>
-        <strong>{{ riskScore }}<small>/100</small></strong>
-        <el-progress :percentage="riskScore" :show-text="false" :stroke-width="10" />
-      </ContentWrap>
-
-      <ContentWrap class="panel metric-card">
-        <span>风险等级</span>
-        <el-tag class="risk-level-tag" :type="riskTagType(selectedResult?.riskLevel)" size="large">
-          {{ selectedResult?.riskLevel || '未选择' }}
-        </el-tag>
-      </ContentWrap>
-
-      <ContentWrap class="panel metric-card">
-        <span>命中因子</span>
-        <strong>{{ riskFactorsCount }}</strong>
-      </ContentWrap>
-
-      <ContentWrap class="panel metric-card">
-        <span>历史案例加分</span>
-        <strong>+{{ caseSimilarityBonus }}</strong>
-      </ContentWrap>
-
-      <ContentWrap class="panel metric-card decision-metric-card">
-        <span>策略 / 复核</span>
-        <div class="decision-metric">
-          <el-tag v-if="selectedResult?.decision?.recommendedAction" :type="decisionTagType(selectedResult.decision.recommendedAction)" size="large">
-            {{ selectedResult.decision.recommendedAction }}
-          </el-tag>
-          <span v-else class="muted">—</span>
-          <el-tag v-if="selectedRecord?.reviewStatus" size="small" effect="plain" class="review-pill">
-            {{ reviewStatusLabel(selectedRecord.reviewStatus) }}
-          </el-tag>
-        </div>
-      </ContentWrap>
-    </section>
-
-    <section class="dashboard-grid">
-      <ContentWrap class="panel chart-card">
-        <div class="panel-head">
-          <div>
-            <h3>风控等级分布</h3>
-            <p>基于当前记录统计各风险等级占比</p>
-          </div>
-        </div>
-        <div ref="riskLevelPieRef" class="chart-canvas"></div>
-      </ContentWrap>
-
-      <ContentWrap class="panel chart-card geo-panel">
-        <div class="panel-head">
-          <div>
-            <h3>全球风险图（IP归属）</h3>
-            <p>按经纬度聚合风险来源，体现地理位置风控</p>
-          </div>
-        </div>
-        <div ref="globalRiskMapRef" class="chart-canvas geo-canvas"></div>
-      </ContentWrap>
-
-      <ContentWrap class="panel chart-card trend-panel">
-        <div class="panel-head">
-          <div>
-            <h3>24小时实时拦截趋势</h3>
-            <p>按小时统计高风险拦截事件（HIGH / CRITICAL）</p>
-          </div>
-        </div>
-        <div ref="interceptTrendRef" class="chart-canvas"></div>
-      </ContentWrap>
-
-      <ContentWrap class="panel chart-card new-terms-panel">
-        <div class="panel-head new-terms-head">
-          <div>
-            <h3>今日新增风险词</h3>
-            <p>来自骗子聊天记录（对方消息 / detectedSignals）；点击穿透关联工单。可在「风险词库」页人工维护。</p>
-          </div>
-          <div class="new-terms-actions">
-            <el-button type="primary" link @click="goRiskTermLib">词库管理</el-button>
-            <el-button type="primary" link :loading="newTermsLoading" @click="loadTodayNewTerms">刷新</el-button>
-          </div>
-        </div>
-        <div v-loading="newTermsLoading" class="new-terms-body">
-          <el-empty v-if="!newTermsLoading && newTermsList.length === 0" description="今日暂无新增风险词" />
-          <div v-else>
-            <div class="new-terms-chips" :class="{ 'is-collapsed': !newTermsExpanded }">
-              <button
-                v-for="item in displayedNewTermsList"
-                :key="item.term"
-                type="button"
-                class="new-term-chip"
-                @click="openTodayNewTermDetail(item.term)"
-              >
-                <span class="new-term-text">{{ item.term }}</span>
-                <span class="new-term-count">{{ item.todayHitCount }} 单</span>
-              </button>
-            </div>
-            <div v-if="newTermsList.length > NEW_TERMS_COLLAPSE_LIMIT" class="new-terms-expand-bar">
-              <span v-if="!newTermsExpanded" class="new-terms-summary">
-                已显示前 {{ NEW_TERMS_COLLAPSE_LIMIT }} 个，共 {{ newTermsList.length }} 个
-              </span>
-              <el-button type="primary" link @click="newTermsExpanded = !newTermsExpanded">
-                {{ newTermsExpanded ? '收起' : `展开全部（${newTermsList.length}）` }}
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </ContentWrap>
-    </section>
-
-    <section v-if="selectedResult" class="detail-stack">
-      <ContentWrap v-if="selectedResult.decision" class="panel decision-panel">
-        <div class="panel-head decision-head">
-          <div>
-            <h3>策略决策与闭环</h3>
-            <p class="decision-hint">{{ selectedResult.decision.reviewHint }}</p>
-          </div>
-          <el-tag v-if="selectedRecord?.reviewStatus" type="info">{{ reviewStatusLabel(selectedRecord.reviewStatus) }}</el-tag>
-        </div>
-        <ul class="reason-list">
-          <li v-for="(m, idx) in selectedResult.decision.reasonMessages" :key="idx">{{ m }}</li>
-        </ul>
-      </ContentWrap>
-
-      <LlmRiskReportPanel :report="selectedResult?.llmReport" />
-      <AgentReflectionPanel :reflection="selectedResult?.agentReflection" />
-      <ContentWrap v-if="selectedResult.caseSimilarityBonus" class="panel metric-inline">
-        <span>历史案例加分</span>
-        <strong>+{{ selectedResult.caseSimilarityBonus }}</strong>
-      </ContentWrap>
-      <AdvancedRiskAnalysisPanel :analysis="selectedResult?.advancedAnalysis" />
-
-      <ThreatIntelPanel
-        :ip-info="selectedResult?.ipInfo"
-        :whois-info="selectedResult?.whoisInfo"
-        :payment-data="selectedPaymentObject"
-      />
-
-      <PaymentTopologyPanel :topology="selectedResult?.topologyInfo" :payment-data="selectedPaymentObject" />
-
-      <ContentWrap class="panel json-panel">
-        <div class="panel-head">
-          <h3>JSON 对照</h3>
-          <p>用于回放风险分析全过程</p>
-        </div>
-        <div class="json-grid">
-          <div class="json-card">
-            <h4>分析结果</h4>
-            <pre class="json-block">{{ selectedResultJson }}</pre>
-          </div>
-          <div class="json-card">
-            <h4>输入数据</h4>
-            <pre class="json-block">{{ selectedPaymentJson }}</pre>
-          </div>
-        </div>
-      </ContentWrap>
-    </section>
-
-    <ContentWrap ref="recordTablePanelRef" class="panel table-panel">
+    <ContentWrap
+      ref="recordTablePanelRef"
+      class="panel table-panel"
+      :body-style="{ padding: '0' }"
+    >
       <div class="panel-head table-head">
-        <div>
-          <h3>分析记录</h3>
-          <p>点击“查看”即可加载详情面板</p>
-        </div>
+        <h3 class="table-title">评估记录</h3>
         <div class="table-actions">
           <el-select
             v-model="recordQuery.reviewStatus"
             placeholder="复核状态"
             clearable
-            style="width: 140px; margin-right: 8px"
+            class="table-filter-select"
             @change="refreshRecordList"
           >
             <el-option label="待复核" value="PENDING" />
@@ -237,7 +25,7 @@
             <el-option label="已拦截" value="RESOLVED_BLOCK" />
             <el-option label="误报结案" value="DISMISSED" />
           </el-select>
-          <el-button type="primary" :loading="recordLoading" @click="refreshRecordList">刷新记录</el-button>
+          <el-button type="primary" :loading="recordLoading" @click="refreshRecordList">刷新</el-button>
           <el-button
             type="danger"
             plain
@@ -245,63 +33,275 @@
             :disabled="recordTotal === 0"
             @click="handleClearRecords"
           >
-            一键清空
+            清空
           </el-button>
         </div>
       </div>
 
-      <el-table v-loading="recordLoading" :data="recordList" :stripe="true" size="small">
-        <el-table-column label="序号" width="90">
-          <template #default="scope">
-            {{ recordTotal - ((recordQuery.pageNo - 1) * recordQuery.pageSize + scope.$index) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" prop="createTime" width="170" :formatter="dateFormatter" />
-        <el-table-column label="场景" prop="scene" min-width="150" />
-        <el-table-column label="来源" prop="source" min-width="150" />
-        <el-table-column label="IP" prop="ip" width="130" />
-        <el-table-column label="等级" prop="riskLevel" width="100">
-          <template #default="scope">
-            <el-tag :type="riskTagType(scope.row.riskLevel)">{{ scope.row.riskLevel }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="分数" prop="riskScore" width="90" />
-        <el-table-column label="策略" prop="decisionAction" width="130">
-          <template #default="scope">
-            <el-tag v-if="scope.row.decisionAction" size="small" :type="decisionTagType(scope.row.decisionAction)">
-              {{ scope.row.decisionAction }}
-            </el-tag>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="复核" prop="reviewStatus" width="110">
-          <template #default="scope">
-            <span>{{ reviewStatusLabel(scope.row.reviewStatus) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
-          <template #default="scope">
-            <el-button link type="primary" @click="handleUseRecord(scope.row)">查看</el-button>
-            <el-button
-              v-if="scope.row.reviewStatus === 'PENDING'"
-              link
-              type="warning"
-              @click="openReviewDialog(scope.row)"
-            >
-              复核
-            </el-button>
-            <el-button link type="danger" @click="handleDeleteRecord(scope.row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wrap">
+        <el-table
+          v-loading="recordLoading"
+          :data="recordList"
+          :stripe="true"
+          fit
+          class="record-table"
+          highlight-current-row
+          :row-class-name="recordRowClassName"
+          @row-click="handleRecordRowClick"
+        >
+          <el-table-column label="时间" prop="createTime" width="168" align="center">
+            <template #default="{ row }">
+              <span class="cell-time">{{ formatRecordTime(row.createTime) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="场景" prop="scene" min-width="168" show-overflow-tooltip />
+          <el-table-column label="IP" prop="ip" width="124" show-overflow-tooltip />
+          <el-table-column label="等级" prop="riskLevel" width="92" align="center">
+            <template #default="scope">
+              <el-tag :type="riskTagType(scope.row.riskLevel)" size="small" effect="light">
+                {{ scope.row.riskLevel || '—' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="分数" prop="riskScore" width="72" align="center">
+            <template #default="{ row }">
+              <span class="cell-score">{{ row.riskScore ?? '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="建议" prop="decisionAction" min-width="96" align="center">
+            <template #default="scope">
+              <el-tag
+                v-if="scope.row.decisionAction"
+                size="small"
+                effect="light"
+                :type="decisionTagType(scope.row.decisionAction)"
+              >
+                {{ decisionActionLabel(scope.row.decisionAction) }}
+              </el-tag>
+              <span v-else class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" min-width="220" align="center" class-name="col-ops">
+            <template #default="scope">
+              <div class="record-op-cell" @click.stop>
+                <el-button link type="primary" @click="handleUseRecord(scope.row)">详情</el-button>
+                <el-button
+                  v-if="scope.row.reviewStatus === 'PENDING'"
+                  link
+                  type="warning"
+                  @click="openReviewDialog(scope.row)"
+                >
+                  复核
+                </el-button>
+                <el-button link type="danger" @click="handleDeleteRecord(scope.row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
-      <Pagination
-        :total="recordTotal"
-        v-model:page="recordQuery.pageNo"
-        v-model:limit="recordQuery.pageSize"
-        @pagination="getRecordList"
-      />
+      <div v-if="recordTotal > 0" class="table-pagination">
+        <Pagination
+          :total="recordTotal"
+          v-model:page="recordQuery.pageNo"
+          v-model:limit="recordQuery.pageSize"
+          @pagination="getRecordList"
+        />
+      </div>
+      <el-empty v-else-if="!recordLoading" class="table-empty" description="暂无评估记录" :image-size="72" />
     </ContentWrap>
+
+    <section v-if="selectedResult" ref="detailPanelRef" class="detail-stack">
+      <ContentWrap class="panel verdict-strip">
+        <div class="verdict-main">
+          <div class="verdict-score">
+            <strong>{{ riskScore }}<small>/100</small></strong>
+            <el-progress :percentage="riskScore" :show-text="false" :stroke-width="6" :color="riskProgressColor" />
+          </div>
+          <div class="verdict-tags">
+            <el-tag class="risk-level-tag" :type="riskTagType(selectedResult?.riskLevel)" size="large" effect="dark">
+              {{ selectedResult?.riskLevel || '—' }}
+            </el-tag>
+            <el-tag
+              v-if="selectedResult?.decision?.recommendedAction"
+              :type="decisionTagType(selectedResult.decision.recommendedAction)"
+            >
+              {{ decisionActionLabel(selectedResult.decision.recommendedAction) }}
+            </el-tag>
+            <el-tag v-if="selectedRecord?.reviewStatus" size="small" effect="plain">
+              {{ reviewStatusLabel(selectedRecord.reviewStatus) }}
+            </el-tag>
+            <el-tag v-if="caseSimilarityBonus > 0" size="small" type="warning" effect="plain">
+              案例+{{ caseSimilarityBonus }}
+            </el-tag>
+          </div>
+          <span class="verdict-meta muted">#{{ selectedRecord?.id }} · {{ selectedRecord?.ip || '—' }}</span>
+        </div>
+        <p v-if="compactVerdictText" class="verdict-summary">{{ compactVerdictText }}</p>
+        <div v-if="displayRiskFactorsPreview.length" class="factor-chips">
+          <span v-for="f in displayRiskFactorsPreview" :key="f" class="factor-chip">{{ f }}</span>
+        </div>
+      </ContentWrap>
+
+      <LlmRiskReportPanel :report="selectedResult?.llmReport" />
+
+      <el-collapse v-model="detailCollapseActive" class="detail-collapse">
+        <el-collapse-item v-if="selectedResult.decision" name="decision">
+          <template #title>
+            <span class="collapse-title">决策说明</span>
+          </template>
+          <p v-if="selectedResult.decision.reviewHint" class="decision-hint">{{ truncateText(selectedResult.decision.reviewHint, 200) }}</p>
+          <ul class="reason-list compact-list">
+            <li v-for="(m, idx) in selectedResult.decision.reasonMessages" :key="idx">{{ truncateText(m, 120) }}</li>
+          </ul>
+        </el-collapse-item>
+
+        <el-collapse-item
+          v-if="selectedResult.riskFactors?.length || selectedResult.deepAnalysis"
+          name="factors"
+        >
+          <template #title>
+            <span class="collapse-title">因子 / 深度分析</span>
+            <span v-if="riskFactorsCount" class="collapse-count">{{ riskFactorsCount }}</span>
+          </template>
+          <ul v-if="selectedResult.riskFactors?.length" class="reason-list compact-list">
+            <li v-for="(f, idx) in selectedResult.riskFactors" :key="idx">{{ truncateText(f, 120) }}</li>
+          </ul>
+          <pre v-if="selectedResult.deepAnalysis" class="analysis-pre">{{ truncateText(selectedResult.deepAnalysis, 600) }}</pre>
+        </el-collapse-item>
+
+        <el-collapse-item name="dashboard">
+          <template #title>
+            <span class="collapse-title">统计看板</span>
+          </template>
+          <section class="dashboard-grid dashboard-grid-nested">
+            <ContentWrap class="panel chart-card">
+              <div class="panel-head compact-head"><h3>等级</h3></div>
+              <div ref="riskLevelPieRef" class="chart-canvas chart-canvas-sm"></div>
+            </ContentWrap>
+            <ContentWrap class="panel chart-card">
+              <div class="panel-head compact-head"><h3>地域</h3></div>
+              <div ref="globalRiskMapRef" class="chart-canvas chart-canvas-sm geo-canvas"></div>
+            </ContentWrap>
+            <ContentWrap class="panel chart-card trend-panel">
+              <div class="panel-head compact-head"><h3>24h 趋势</h3></div>
+              <div ref="interceptTrendRef" class="chart-canvas chart-canvas-sm"></div>
+            </ContentWrap>
+            <ContentWrap class="panel chart-card new-terms-panel">
+              <div class="panel-head new-terms-head compact-head">
+                <h3>今日话术</h3>
+                <div class="new-terms-actions">
+                  <el-button type="primary" link @click="goRiskTermLib">词库</el-button>
+                  <el-button type="primary" link :loading="newTermsLoading" @click="loadTodayNewTerms">刷新</el-button>
+                </div>
+              </div>
+              <div v-loading="newTermsLoading" class="new-terms-body">
+                <el-empty v-if="!newTermsLoading && newTermsList.length === 0" description="今日无新增" />
+                <div v-else class="new-terms-chips" :class="{ 'is-collapsed': !newTermsExpanded }">
+                  <button
+                    v-for="item in displayedNewTermsList"
+                    :key="item.term"
+                    type="button"
+                    class="new-term-chip"
+                    @click="openTodayNewTermDetail(item.term)"
+                  >
+                    <span class="new-term-text">{{ item.term }}</span>
+                    <span class="new-term-count">{{ item.todayHitCount }} 单</span>
+                  </button>
+                </div>
+                <div v-if="newTermsList.length > NEW_TERMS_COLLAPSE_LIMIT" class="new-terms-expand-bar">
+                  <el-button type="primary" link @click="newTermsExpanded = !newTermsExpanded">
+                    {{ newTermsExpanded ? '收起' : `展开全部（${newTermsList.length}）` }}
+                  </el-button>
+                </div>
+              </div>
+            </ContentWrap>
+          </section>
+        </el-collapse-item>
+
+        <el-collapse-item v-if="selectedResult.advancedAnalysis || selectedResult.agentReflection" name="advanced">
+          <template #title>
+            <span class="collapse-title">高级 / Agent</span>
+          </template>
+          <AdvancedRiskAnalysisPanel :analysis="selectedResult?.advancedAnalysis" />
+          <AgentReflectionPanel :reflection="selectedResult?.agentReflection" />
+        </el-collapse-item>
+
+        <el-collapse-item name="intel">
+          <template #title>
+            <span class="collapse-title">情报 / 拓扑 / OCR</span>
+          </template>
+          <ThreatIntelPanel
+            :ip-info="selectedResult?.ipInfo"
+            :whois-info="selectedResult?.whoisInfo"
+            :payment-data="selectedPaymentObject"
+          />
+          <PaymentTopologyPanel :topology="selectedResult?.topologyInfo" :payment-data="selectedPaymentObject" />
+          <ImageContentAnalysisPanel :payment-data="selectedPaymentObject" :record-id="selectedRecord?.id ?? null" />
+        </el-collapse-item>
+
+        <el-collapse-item name="json">
+          <template #title>
+            <span class="collapse-title">原始 JSON</span>
+          </template>
+          <div class="json-grid">
+            <div class="json-card">
+              <h4>分析结果</h4>
+              <pre class="json-block">{{ selectedResultJson }}</pre>
+            </div>
+            <div class="json-card">
+              <h4>输入数据</h4>
+              <pre class="json-block">{{ selectedPaymentJson }}</pre>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </section>
+
+    <el-empty v-else class="panel empty-hint" description="请选择一条记录" />
+
+    <el-collapse class="debug-collapse">
+      <el-collapse-item name="debug">
+        <template #title>
+          <span class="collapse-title">调试 · 发起评估</span>
+        </template>
+        <ContentWrap class="panel invoke-assess-panel">
+          <el-form label-width="100px" class="invoke-form">
+            <el-form-item label="客户端 IP">
+              <el-input v-model="assessIp" placeholder="如 8.8.8.8" clearable style="max-width: 320px" />
+            </el-form-item>
+            <el-form-item label="本人情况">
+              <div class="profile-inline">
+                <el-select v-model="userAgeBand" placeholder="年龄段" clearable style="width: 140px">
+                  <el-option label="未成年" value="UNDER_18" />
+                  <el-option label="青年" value="YOUNG_ADULT" />
+                  <el-option label="中年" value="MIDDLE_AGED" />
+                  <el-option label="中老年" value="SENIOR" />
+                </el-select>
+                <el-select v-model="userPersonality" placeholder="个性倾向" clearable style="width: 180px">
+                  <el-option label="偏焦虑" value="ANXIOUS" />
+                  <el-option label="偏谨慎" value="CAUTIOUS" />
+                  <el-option label="数字新手" value="DIGITAL_NOVICE" />
+                  <el-option label="易信权威" value="AUTHORITY_TRUSTING" />
+                  <el-option label="易冲动" value="IMPULSIVE" />
+                </el-select>
+                <el-select v-model="userRiskLiteracy" placeholder="防诈了解" clearable style="width: 120px">
+                  <el-option label="较少" value="LOW" />
+                  <el-option label="一般" value="MEDIUM" />
+                  <el-option label="熟悉" value="HIGH" />
+                </el-select>
+              </div>
+            </el-form-item>
+            <el-form-item label="paymentData">
+              <el-input v-model="assessPaymentJson" type="textarea" :rows="10" class="json-textarea" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="assessSubmitting" @click="handleInvokeAssess">提交评估</el-button>
+            </el-form-item>
+          </el-form>
+        </ContentWrap>
+      </el-collapse-item>
+    </el-collapse>
 
     <el-dialog v-model="reviewDialogVisible" title="人工复核" width="440px" destroy-on-close>
       <el-form label-width="88px">
@@ -367,7 +367,7 @@ import * as echarts from 'echarts'
 import worldGeoJson from '@/assets/world.geo.json'
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { dateFormatter } from '@/utils/formatTime'
+import { formatDate } from '@/utils/formatTime'
 import { useMessage } from '@/hooks/web/useMessage'
 import AdvancedRiskAnalysisPanel from './components/AdvancedRiskAnalysisPanel.vue'
 import AgentReflectionPanel from './components/AgentReflectionPanel.vue'
@@ -459,6 +459,16 @@ const newTermDrawerTitle = ref('今日新增风险词')
 const newTermDetailLoading = ref(false)
 const newTermTickets = ref<PayRiskTermRelatedTicket[]>([])
 const recordTablePanelRef = ref<{ $el?: HTMLElement } | null>(null)
+const detailPanelRef = ref<HTMLElement | null>(null)
+const detailCollapseActive = ref<string[]>([])
+
+const VERDICT_PREVIEW_LEN = 96
+const MAX_FACTOR_CHIPS = 3
+const truncateText = (text?: string, max = 120) => {
+  const s = (text || '').trim()
+  if (!s) return ''
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
 
 const assessSubmitting = ref(false)
 const assessIp = ref('8.8.8.8')
@@ -528,6 +538,50 @@ const caseSimilarityBonus = computed(() => {
   const matches = selectedResult.value?.advancedAnalysis?.caseMatches || []
   return Math.min(20, matches.reduce((sum, item) => sum + Number(item.bonusScore || 0), 0))
 })
+
+const compactVerdictText = computed(() => {
+  const report = selectedResult.value?.llmReport
+  const raw = report?.summary?.trim() || report?.verdict?.trim() || selectedResult.value?.deepAnalysis?.trim() || ''
+  return truncateText(raw, VERDICT_PREVIEW_LEN)
+})
+
+const displayRiskFactorsPreview = computed(() => {
+  const factors = selectedResult.value?.riskFactors || []
+  return factors.slice(0, MAX_FACTOR_CHIPS).map((f) => truncateText(f, 36))
+})
+
+const riskProgressColor = computed(() => {
+  const score = riskScore.value
+  if (score >= 85) return '#ef4444'
+  if (score >= 65) return '#f97316'
+  if (score >= 35) return '#eab308'
+  return '#22c55e'
+})
+
+const decisionActionLabel = (action?: string) => {
+  switch ((action || '').toUpperCase()) {
+    case 'ALLOW':
+      return '放行'
+    case 'MANUAL_REVIEW':
+      return '人工复核'
+    case 'BLOCK':
+      return '拦截'
+    default:
+      return action || '—'
+  }
+}
+
+const recordRowClassName = ({ row }: { row: PayRiskAssessRecordVO }) =>
+  row.id === selectedRecord.value?.id ? 'is-current-record' : ''
+
+const formatRecordTime = (value?: string | Date) => {
+  if (!value) return '—'
+  return formatDate(new Date(value), 'YYYY-MM-DD HH:mm')
+}
+
+const handleRecordRowClick = (row: PayRiskAssessRecordVO) => {
+  handleUseRecord(row)
+}
 
 const ipGeoCache = new Map<string, { lng: number; lat: number; name?: string; countryCode?: string }>()
 const ipGeoPending = new Map<string, Promise<{ lng: number; lat: number; name?: string; countryCode?: string } | null>>()
@@ -863,8 +917,6 @@ const getRecordList = async () => {
     }
 
     await enrichRecordIpGeo()
-    await nextTick()
-    renderDashboardCharts()
     await loadTodayNewTerms()
   } catch (error: any) {
     recordList.value = []
@@ -922,11 +974,8 @@ const openRecordFromTicket = async (id: number) => {
     if (page.list?.length) {
       selectedRecord.value = page.list[0]
       newTermDrawerVisible.value = false
-      message.success(`已加载评估工单 #${id}`)
       await nextTick()
-      const wrap = recordTablePanelRef.value
-      const el = wrap?.$el ?? wrap
-      el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      scrollToDetailPanel()
     } else {
       message.warning('未找到该工单记录')
     }
@@ -978,9 +1027,15 @@ const handleInvokeAssess = async () => {
   }
 }
 
-const handleUseRecord = (record: PayRiskAssessRecordVO) => {
+const handleUseRecord = async (record: PayRiskAssessRecordVO) => {
   selectedRecord.value = record
-  message.success(`已加载记录 #${record.id}`)
+  detailCollapseActive.value = []
+  await nextTick()
+  detailPanelRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
+const scrollToDetailPanel = () => {
+  detailPanelRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 
 const handleDeleteRecord = async (record: PayRiskAssessRecordVO) => {
@@ -1098,7 +1153,16 @@ const submitReview = async () => {
 
 watch(recordList, async () => {
   await nextTick()
-  renderDashboardCharts()
+  if (detailCollapseActive.value.includes('dashboard')) {
+    renderDashboardCharts()
+  }
+})
+
+watch(detailCollapseActive, async (active) => {
+  if (active.includes('dashboard')) {
+    await nextTick()
+    renderDashboardCharts()
+  }
 })
 
 onMounted(async () => {
@@ -1158,6 +1222,403 @@ onBeforeUnmount(() => {
     radial-gradient(circle at 100% 0%, rgba(77, 223, 215, 0.16), transparent 28%),
     linear-gradient(160deg, #f1f6ff 0%, #f6f9ff 48%, #fbfdff 100%);
   border-radius: 16px;
+}
+
+.hero-compact {
+  padding: 14px 20px;
+}
+
+.hero-compact h1 {
+  margin: 0;
+  font-size: 22px;
+  color: #1a3d64;
+  line-height: 1.25;
+}
+
+.verdict-strip {
+  padding: 14px 18px;
+  border-color: rgba(59, 130, 246, 0.35);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(96, 193, 255, 0.15), transparent 45%),
+    linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.92));
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.1);
+}
+
+.verdict-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.verdict-score {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.verdict-score strong {
+  font-size: 28px;
+  color: #1f446a;
+  line-height: 1;
+}
+
+.verdict-score strong small {
+  font-size: 14px;
+  color: #6d8bae;
+}
+
+.verdict-score :deep(.el-progress) {
+  flex: 1;
+  min-width: 72px;
+  max-width: 120px;
+}
+
+.verdict-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.verdict-strip .verdict-meta {
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.verdict-summary {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  border-left: 3px solid #3b82f6;
+  color: #1e3a5f;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.factor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.factor-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(254, 226, 226, 0.7);
+  color: #991b1b;
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapse-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.compact-list {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.compact-list li {
+  margin-bottom: 4px;
+}
+
+.table-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #24486f;
+  padding-left: 12px;
+  position: relative;
+}
+
+.table-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3b82f6, #60a5fa);
+}
+
+.detail-collapse {
+  border: none;
+  background: transparent;
+}
+
+.detail-collapse :deep(.el-collapse-item) {
+  margin-bottom: 8px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(140, 183, 232, 0.35);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.detail-collapse :deep(.el-collapse-item__header) {
+  padding: 0 16px;
+  height: 46px;
+  border: none;
+  background: rgba(248, 252, 255, 0.9);
+  font-size: 14px;
+}
+
+.detail-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+}
+
+.detail-collapse :deep(.el-collapse-item__content) {
+  padding: 12px 16px 16px;
+}
+
+.collapse-title {
+  font-weight: 600;
+  color: #1a3d64;
+}
+
+.collapse-badge {
+  margin-left: 10px;
+}
+
+.analysis-pre {
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.dashboard-grid-nested {
+  margin-top: 0;
+}
+
+.chart-canvas-sm {
+  height: 240px;
+}
+
+.compact-head {
+  margin-bottom: 8px;
+}
+
+.compact-head h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #1a3d64;
+}
+
+.debug-collapse {
+  border: none;
+  background: transparent;
+}
+
+.debug-collapse :deep(.el-collapse-item) {
+  border-radius: 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.5);
+  background: rgba(248, 250, 252, 0.6);
+}
+
+.debug-collapse :deep(.el-collapse-item__header) {
+  padding: 0 14px;
+  border: none;
+  height: 42px;
+}
+
+.empty-hint {
+  padding: 32px 16px;
+}
+
+.detail-stack :deep(.panel:not(.table-panel):hover) {
+  transform: translateY(-2px);
+}
+
+.detail-stack :deep(.llm-panel) {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 10px 28px rgba(99, 102, 241, 0.12);
+}
+
+.detail-stack :deep(.advanced-panel),
+.detail-stack :deep(.reflection-panel),
+.detail-stack :deep(.intel-panel),
+.detail-stack :deep(.image-ocr-panel) {
+  margin-top: 0;
+}
+
+.table-panel :deep(.el-table__body tr.is-current-record > td.el-table__cell) {
+  background-color: rgba(239, 246, 255, 0.9) !important;
+}
+
+.table-panel :deep(.el-table__body tr.current-row > td.el-table__cell) {
+  background-color: rgba(239, 246, 255, 0.9) !important;
+}
+
+/* 评估记录：沿用 panel 渐变，表格区不随卡片上浮 */
+.table-panel.panel {
+  padding: 0;
+}
+
+.table-panel.panel:hover {
+  transform: none;
+}
+
+.table-panel :deep(.el-card__body) {
+  padding: 18px 18px 14px !important;
+}
+
+.table-head {
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.table-head-text h3::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3b82f6, #60a5fa);
+}
+
+.table-head-text {
+  min-width: 0;
+}
+
+.table-filter-select {
+  width: 140px;
+}
+
+.table-wrap {
+  width: 100%;
+  margin-top: 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e8eef4;
+}
+
+.record-table {
+  width: 100% !important;
+}
+
+.table-panel :deep(.record-table .el-table__cell) {
+  padding: 12px 0;
+}
+
+.table-panel :deep(.record-table .cell) {
+  line-height: 22px;
+  padding: 0 12px;
+}
+
+.table-panel :deep(.record-table .col-ops .cell) {
+  padding: 0 10px;
+}
+
+.record-op-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  row-gap: 4px;
+}
+
+.record-op-cell :deep(.el-button) {
+  margin: 0;
+  padding: 4px 6px;
+}
+
+.cell-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: #3d5f82;
+  white-space: nowrap;
+}
+
+.cell-score {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #1f446a;
+}
+
+.table-pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.table-empty {
+  padding: 24px 0 8px;
+}
+
+.table-panel :deep(.el-table) {
+  --el-table-border-color: #e8eef4;
+  --el-table-bg-color: transparent;
+  --el-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: #f1f5f9;
+  --el-table-row-height: 48px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.table-panel :deep(.el-table::before),
+.table-panel :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.table-panel :deep(.el-table th.el-table__cell) {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 1px solid #e8eef4;
+}
+
+.table-panel :deep(.el-table td.el-table__cell) {
+  border-bottom: 1px solid #eef2f6;
+}
+
+.table-panel :deep(.el-table__body tr:last-child td.el-table__cell) {
+  border-bottom: none;
+}
+
+.table-panel :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.table-panel :deep(.el-table__body tr:hover > td.el-table__cell) {
+  background-color: rgba(241, 245, 249, 0.95) !important;
+}
+
+@media (max-width: 1200px) {
+  .table-panel :deep(.el-table__body-wrapper) {
+    overflow-x: auto;
+  }
 }
 
 .hero {
@@ -1285,6 +1746,16 @@ onBeforeUnmount(() => {
   color: #2c4a66;
   font-size: 13px;
   line-height: 1.65;
+}
+
+.verdict-strip .risk-level-tag {
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  height: 34px !important;
+  line-height: 32px !important;
+  padding: 0 12px !important;
+  letter-spacing: 0.04em;
+  border-radius: 10px;
 }
 
 .risk-level-tag {
@@ -1590,21 +2061,6 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
 }
 
-.table-panel :deep(.el-table) {
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(128, 171, 224, 0.34);
-  --el-table-bg-color: rgba(248, 252, 255, 0.92);
-  --el-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-}
-
-.table-panel :deep(.el-table th.el-table__cell) {
-  background: linear-gradient(180deg, rgba(236, 246, 255, 0.95), rgba(225, 239, 255, 0.95));
-  color: #31567e;
-  font-weight: 700;
-}
-
 @media (max-width: 1200px) {
   .hero {
     grid-template-columns: 1fr;
@@ -1637,15 +2093,22 @@ onBeforeUnmount(() => {
 
   .table-head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   .table-actions {
     width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
 
     :deep(.el-button) {
-      flex: 1;
+      flex: 0 0 auto;
     }
+  }
+
+  .table-filter-select {
+    width: 100%;
+    max-width: 100%;
   }
 }
 </style>

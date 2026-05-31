@@ -1,12 +1,6 @@
 <template>
   <ContentWrap v-if="analysis" class="panel advanced-panel">
-    <div class="panel-head">
-      <div>
-        <p class="panel-kicker">Advanced Analysis</p>
-        <h3>风险演化与干预推演</h3>
-        <p class="panel-desc">{{ analysis.universe?.summary || '从风险时间轴、反事实场景、关系宇宙和干预策略四个方向做深入推演。' }}</p>
-      </div>
-    </div>
+    <h3 class="section-title-only">推演分析</h3>
 
     <div class="section-grid">
       <article class="module-card">
@@ -131,6 +125,13 @@ const totalCaseBonus = computed(() => {
   background:
     radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.1), transparent 30%),
     linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+}
+
+.section-title-only {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #12202f;
 }
 
 .panel-head h3 {

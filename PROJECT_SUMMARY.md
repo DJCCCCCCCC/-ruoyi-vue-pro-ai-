@@ -197,6 +197,32 @@ pnpm dev
 3. 如果遇到 CORS 问题，检查后端的 CORS 配置
 4. Maven 配置文件可能需要修复（settings.xml 有语法错误）
 
+## Docker 一键部署（比赛推荐）
+
+详见 **[docker/README.md](docker/README.md)**。
+
+**前置：先启动 Docker Desktop。**
+
+```bat
+cd docker
+copy .env.example .env
+:: 编辑 .env 填入 SPRING_AI_DASHSCOPE_API_KEY 和 YUDAO_PAY_RISK_ASSESS_IPINFO_TOKEN
+
+:: 方式一：快速（本机 Maven 打包 + Docker 跑服务，推荐）
+start-fast.bat
+
+:: 方式二：全量 Docker 构建（无需本机 Maven，较慢）
+start.bat
+```
+
+| 入口 | 地址 |
+|------|------|
+| 聊天演示 | http://localhost:5173 |
+| 管理后台 | http://localhost:8080 |
+| 后端 API | http://localhost:48080 |
+
+默认账号：`admin` / `admin123`
+
 ## 文件位置
 
 - 后端项目：`D:\桌面\Code\ai检测风险\-ruoyi-vue-pro-ai-`

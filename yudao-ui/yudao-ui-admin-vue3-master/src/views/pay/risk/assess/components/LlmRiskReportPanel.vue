@@ -1,81 +1,88 @@
 <template>
   <ContentWrap v-if="report" class="panel llm-panel">
-    <div class="panel-head">
-      <div>
-        <p class="panel-kicker">LLM Analysis</p>
-        <h3>模型综合研判</h3>
-        <p class="panel-desc">{{ report.summary || '模型正在结合风险评分、拓扑、行为和情报结果做综合判断。' }}</p>
-      </div>
-      <div class="badge-group">
-        <span class="mode-badge">{{ report.mode || 'LLM' }}</span>
-        <el-tag :type="confidenceTagType">{{ report.confidence || 'MEDIUM' }}</el-tag>
-      </div>
+    <div class="panel-head llm-head">
+      <h3>AI 研判</h3>
+      <el-tag :type="confidenceTagType" size="small">{{ confidenceLabel }}</el-tag>
     </div>
 
-    <div class="panel-grid">
-      <article v-if="hasPersona && persona" class="llm-card persona-card">
-        <span>人物画像分析</span>
-        <p v-if="persona.summary" class="persona-summary">{{ persona.summary }}</p>
+    <p v-if="headlineText" class="verdict-highlight">
+      <span class="hl-label">结论</span>
+      <span class="hl-text">{{ headlineText }}</span>
+    </p>
+
+    <div class="llm-core-grid">
+      <article class="llm-card recommend-card">
+        <span>建议</span>
+        <ul v-if="report.recommendations?.length" class="bullet-list">
+          <li v-for="item in report.recommendations.slice(0, 3)" :key="item">{{ truncate(item, 100) }}</li>
+        </ul>
+        <p v-else class="empty-text">—</p>
+      </article>
+      <article class="llm-card evidence-card">
+        <span>证据</span>
+        <ul v-if="report.evidence?.length" class="bullet-list">
+          <li v-for="item in report.evidence.slice(0, 3)" :key="item">{{ truncate(item, 100) }}</li>
+        </ul>
+        <p v-else class="empty-text">—</p>
+      </article>
+    </div>
+
+    <el-collapse v-if="hasExtraContent" class="llm-extra-collapse">
+      <el-collapse-item v-if="report.evidence && report.evidence.length > 3" name="more-evidence">
+        <template #title><span class="collapse-title">更多证据</span></template>
+        <ul class="bullet-list">
+          <li v-for="item in report.evidence.slice(3)" :key="'e-' + item">{{ truncate(item, 120) }}</li>
+        </ul>
+      </el-collapse-item>
+
+      <el-collapse-item v-if="report.recommendations && report.recommendations.length > 3" name="more-rec">
+        <template #title><span class="collapse-title">更多建议</span></template>
+        <ul class="bullet-list">
+          <li v-for="item in report.recommendations.slice(3)" :key="'r-' + item">{{ truncate(item, 120) }}</li>
+        </ul>
+      </el-collapse-item>
+
+      <el-collapse-item v-if="hasPersona && persona" name="persona">
+        <template #title><span class="collapse-title">画像 / 话术</span></template>
+        <p v-if="persona.summary" class="persona-summary">{{ truncate(persona.summary, 200) }}</p>
         <div class="persona-meta">
           <div v-if="persona.claimedOrImpliedRole" class="persona-meta-item">
-            <em>呈现/暗示身份</em>
+            <em>身份</em>
             <strong>{{ persona.claimedOrImpliedRole }}</strong>
           </div>
           <div v-if="persona.inferredArchetype" class="persona-meta-item">
-            <em>原型归纳</em>
+            <em>原型</em>
             <strong>{{ persona.inferredArchetype }}</strong>
           </div>
         </div>
         <div v-if="persona.communicationTraits?.length" class="persona-sub">
-          <em>话术与互动</em>
-          <ul class="bullet-list">
-            <li v-for="item in persona.communicationTraits" :key="'t-' + item">{{ item }}</li>
+          <ul class="bullet-list compact">
+            <li v-for="item in persona.communicationTraits" :key="'t-' + item">{{ truncate(item, 80) }}</li>
           </ul>
         </div>
         <div v-if="persona.pressureAndControlSignals?.length" class="persona-sub">
-          <em>施压与诱导信号</em>
-          <ul class="bullet-list">
-            <li v-for="item in persona.pressureAndControlSignals" :key="'p-' + item">{{ item }}</li>
+          <em>施压</em>
+          <ul class="bullet-list compact">
+            <li v-for="item in persona.pressureAndControlSignals" :key="'p-' + item">{{ truncate(item, 80) }}</li>
           </ul>
         </div>
-      </article>
-      <article v-if="hasTailored && tailored" class="llm-card tailored-card">
-        <span>为您说明（结合本人情况）</span>
-        <p v-if="tailored.whyLikelyScamPlainLanguage" class="tailored-lead">{{ tailored.whyLikelyScamPlainLanguage }}</p>
-        <p v-if="tailored.reassuranceLine" class="tailored-reassure">{{ tailored.reassuranceLine }}</p>
-        <div v-if="tailored.preventionTipsForThisUser?.length" class="persona-sub">
-          <em>个性化防范</em>
-          <ul class="bullet-list">
-            <li v-for="item in tailored.preventionTipsForThisUser" :key="'tu-' + item">{{ item }}</li>
-          </ul>
-        </div>
-      </article>
-      <article class="llm-card verdict-card">
-        <span>结论</span>
-        <strong>{{ report.verdict || '暂无模型结论' }}</strong>
-      </article>
-      <article class="llm-card">
-        <span>关键证据</span>
-        <ul v-if="report.evidence?.length" class="bullet-list">
-          <li v-for="item in report.evidence" :key="item">{{ item }}</li>
+      </el-collapse-item>
+
+      <el-collapse-item v-if="hasTailored && tailored" name="tailored">
+        <template #title><span class="collapse-title">防诈提示</span></template>
+        <p v-if="tailored.whyLikelyScamPlainLanguage" class="tailored-lead">{{ truncate(tailored.whyLikelyScamPlainLanguage, 200) }}</p>
+        <ul v-if="tailored.preventionTipsForThisUser?.length" class="bullet-list compact">
+          <li v-for="item in tailored.preventionTipsForThisUser" :key="'tu-' + item">{{ truncate(item, 100) }}</li>
         </ul>
-        <p v-else class="empty-text">暂无证据摘要</p>
-      </article>
-      <article class="llm-card">
-        <span>可疑主体</span>
-        <div v-if="report.suspiciousEntities?.length" class="chip-list">
+      </el-collapse-item>
+
+      <el-collapse-item v-if="report.suspiciousEntities?.length" name="entities">
+        <template #title><span class="collapse-title">可疑主体</span></template>
+        <div class="chip-list">
           <span v-for="item in report.suspiciousEntities" :key="item" class="chip">{{ item }}</span>
         </div>
-        <p v-else class="empty-text">暂无主体归因</p>
-      </article>
-      <article class="llm-card">
-        <span>建议动作</span>
-        <ul v-if="report.recommendations?.length" class="bullet-list">
-          <li v-for="item in report.recommendations" :key="item">{{ item }}</li>
-        </ul>
-        <p v-else class="empty-text">暂无处置建议</p>
-      </article>
-    </div>
+      </el-collapse-item>
+    </el-collapse>
   </ContentWrap>
 </template>
 
@@ -93,19 +100,41 @@ interface Props {
 
 const props = defineProps<Props>()
 
+const truncate = (text?: string, max = 120) => {
+  const s = (text || '').trim()
+  if (!s) return ''
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+const headlineText = computed(() => {
+  const r = props.report
+  if (!r) return ''
+  const verdict = r.verdict?.trim()
+  const summary = r.summary?.trim()
+  if (verdict && summary && verdict !== summary) {
+    return truncate(verdict, 140)
+  }
+  return truncate(summary || verdict, 140)
+})
+
 const confidenceTagType = computed(() => {
   if (props.report?.confidence === 'HIGH') return 'danger'
   if (props.report?.confidence === 'LOW') return 'success'
   return 'warning'
 })
 
+const confidenceLabel = computed(() => {
+  const c = props.report?.confidence
+  if (c === 'HIGH') return '高'
+  if (c === 'LOW') return '低'
+  return '中'
+})
+
 const persona = computed(() => props.report?.personaProfile)
 
 const hasPersona = computed(() => {
   const pr = persona.value as PayRiskLlmPersonaProfile | undefined
-  if (!pr) {
-    return false
-  }
+  if (!pr) return false
   return !!(
     pr.summary?.trim() ||
     pr.claimedOrImpliedRole?.trim() ||
@@ -118,142 +147,162 @@ const hasPersona = computed(() => {
 const tailored = computed(() => props.report?.tailoredUserGuidance)
 
 const hasTailored = computed(() => {
-  const t = tailored.value as PayRiskLlmTailoredUserGuidance | undefined
-  if (!t) {
-    return false
-  }
+  const tg = tailored.value as PayRiskLlmTailoredUserGuidance | undefined
+  if (!tg) return false
   return !!(
-    t.whyLikelyScamPlainLanguage?.trim() ||
-    t.reassuranceLine?.trim() ||
-    (t.preventionTipsForThisUser && t.preventionTipsForThisUser.length > 0)
+    tg.whyLikelyScamPlainLanguage?.trim() ||
+    (tg.preventionTipsForThisUser && tg.preventionTipsForThisUser.length > 0)
+  )
+})
+
+const hasExtraContent = computed(() => {
+  const r = props.report
+  if (!r) return false
+  return (
+    (r.evidence && r.evidence.length > 3) ||
+    (r.recommendations && r.recommendations.length > 3) ||
+    hasPersona.value ||
+    hasTailored.value ||
+    (r.suspiciousEntities && r.suspiciousEntities.length > 0)
   )
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .llm-panel {
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(14, 165, 233, 0.12), transparent 32%),
-    linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%);
+  border-color: rgba(99, 102, 241, 0.35);
 }
 
-.panel-head {
+.llm-head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.panel-kicker {
+.llm-head h3 {
   margin: 0;
-  color: #6d8599;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 17px;
+  color: #1a3d64;
 }
 
-.panel-head h3 {
-  margin: 4px 0 0;
-  color: #12202f;
-  font-size: 20px;
+.verdict-highlight {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(255, 255, 255, 0.92));
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  margin-bottom: 12px;
 }
 
-.panel-desc,
-.empty-text,
-.bullet-list {
-  margin: 8px 0 0;
-  color: #556d80;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.badge-group {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.mode-badge {
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(14, 165, 233, 0.12);
-  color: #0369a1;
-  font-size: 12px;
+.hl-label {
+  display: block;
+  font-size: 11px;
   font-weight: 700;
+  color: #0369a1;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
 }
 
-.panel-grid {
+.hl-text {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.55;
+}
+
+.llm-core-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 16px;
+  gap: 12px;
 }
 
 .llm-card {
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.9);
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.88);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.llm-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
 .llm-card > span {
   display: block;
-  color: #6d8599;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  color: #64748b;
 }
 
-.llm-card > strong {
-  display: block;
+.recommend-card {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.85), rgba(255, 255, 255, 0.92));
+}
+
+.evidence-card {
+  border-color: rgba(249, 115, 22, 0.35);
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.85), rgba(255, 255, 255, 0.92));
+}
+
+.bullet-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bullet-list.compact {
+  margin-top: 4px;
+}
+
+.empty-text {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.llm-extra-collapse {
   margin-top: 8px;
-  color: #12202f;
-  font-size: 16px;
-  line-height: 1.6;
+  border: none;
+  background: transparent;
 }
 
-.persona-card,
-.tailored-card {
-  grid-column: 1 / -1;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(255, 255, 255, 0.95));
-  border-color: rgba(99, 102, 241, 0.22);
+.llm-extra-collapse :deep(.el-collapse-item__header) {
+  border: none;
+  background: rgba(248, 250, 252, 0.8);
+  border-radius: 8px;
+  padding: 0 10px;
+  height: 36px;
+  font-size: 12px;
 }
 
-.tailored-card {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.07), rgba(254, 243, 199, 0.35));
-  border-color: rgba(14, 165, 233, 0.2);
+.llm-extra-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+  background: transparent;
 }
 
-.tailored-lead {
-  margin: 8px 0 0;
-  color: #1e293b;
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.tailored-reassure {
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(254, 249, 195, 0.55);
-  color: #713f12;
-  font-size: 13px;
-  line-height: 1.55;
+.collapse-title {
+  font-weight: 600;
+  color: #334155;
 }
 
 .persona-summary {
-  margin: 8px 0 0;
+  margin: 0 0 8px;
   color: #334155;
-  font-size: 14px;
-  line-height: 1.65;
-  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .persona-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .persona-meta-item em,
@@ -263,50 +312,37 @@ const hasTailored = computed(() => {
   font-size: 11px;
   font-weight: 700;
   color: #64748b;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-}
-
-.persona-meta-item strong {
-  display: block;
-  font-size: 13px;
-  color: #1e293b;
-  line-height: 1.5;
+  margin-bottom: 2px;
 }
 
 .persona-sub {
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
-.verdict-card {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(15, 23, 42, 0.02));
-}
-
-.bullet-list {
-  padding-left: 18px;
+.tailored-lead {
+  margin: 0;
+  color: #1e293b;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .chip-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
 }
 
 .chip {
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
-  background: rgba(226, 232, 240, 0.6);
-  color: #294256;
+  background: rgba(226, 232, 240, 0.8);
+  color: #334155;
   font-size: 12px;
-  font-weight: 600;
 }
 
 @media (max-width: 768px) {
-  .panel-head,
-  .panel-grid {
+  .llm-core-grid {
     grid-template-columns: 1fr;
-    flex-direction: column;
   }
 }
 </style>

@@ -1,19 +1,12 @@
 <template>
   <section v-if="hasIntel" class="intel-panel">
-    <div class="panel-head">
-      <div>
-        <p class="panel-kicker">Threat Intel</p>
-        <h3>情报面板</h3>
-        <p class="panel-desc">IP 情报和 Whois 安全检测按同一套风险语言可视化展示。</p>
-      </div>
-    </div>
+    <h3 class="section-title-only">IP / 域名情报</h3>
 
     <div class="intel-grid">
       <article v-if="ipInfoRecord" class="module-card">
         <div class="module-head">
           <div>
-            <span class="section-title">IP 情报</span>
-            <p class="module-summary">结合地理位置、网络归属和匿名代理特征，快速判断网络环境是否可疑。</p>
+            <span class="section-title">IP</span>
           </div>
           <span :class="['status-pill', `tone-${ipRiskTone}`]">{{ ipRiskLabel }}</span>
         </div>
@@ -115,8 +108,7 @@
       <article v-if="showWhoisModule" class="module-card">
         <div class="module-head">
           <div>
-            <span class="section-title">Whois 情报</span>
-            <p class="module-summary">聚合域名注册时间、注册主体、隐私保护和新注册信号，辅助识别钓鱼或一次性域名。</p>
+            <span class="section-title">Whois</span>
           </div>
           <span :class="['status-pill', `tone-${whoisRiskTone}`]">{{ whoisRiskLabel }}</span>
         </div>
@@ -145,7 +137,7 @@
         </div>
 
         <div v-if="!whoisInfoRecord && fallbackWhoisDomains.length" class="fallback-note">
-          当前结果未返回 Whois 原始记录，以下域名由输入内容自动提取并先行展示。
+          仅展示从输入提取的域名，Whois 待补齐。
         </div>
 
         <div class="summary-grid">
@@ -621,11 +613,18 @@ const hasIntel = computed(() => Boolean(ipInfoRecord.value || showWhoisModule.va
 <style scoped>
 .intel-panel {
   border-radius: 18px;
-  padding: 20px;
+  padding: 16px;
   background:
     radial-gradient(circle at top left, rgba(14, 165, 233, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 249, 255, 0.98));
   border: 1px solid #d8e4ef;
+}
+
+.section-title-only {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #12202f;
 }
 
 .panel-head {

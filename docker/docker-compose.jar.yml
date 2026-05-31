@@ -1,0 +1,9 @@
+# 使用本地已构建 jar 启动（跳过 Docker 内 Maven 编译，推荐比赛现场使用）
+# 用法：先在项目根目录执行 mvn clean package -Dmaven.test.skip=true
+#       再执行 docker compose -f docker-compose.yml -f docker-compose.jar.yml up -d --build
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile.jar

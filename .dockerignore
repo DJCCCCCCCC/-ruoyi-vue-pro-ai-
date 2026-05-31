@@ -1,0 +1,16 @@
+# 构建上下文排除项（加速 Docker 构建）
+.git
+.idea
+.vscode
+**/.cursor
+**/node_modules
+**/target
+**/dist
+**/dist-prod
+docs/
+*.md
+!docker/README.md
+yudao-ui/yudao-ui-admin-uniapp/
+yudao-ui/yudao-ui-admin-vben/
+script/build_docx.py
+script/fix_docx_format.py

@@ -1,11 +1,7 @@
 <template>
   <section v-if="hasTopology" class="topology-panel">
-    <div class="panel-head">
-      <div>
-        <p class="panel-kicker">Relation Graph</p>
-        <h3>支付关系拓扑</h3>
-        <p class="panel-desc">基于 ECharts Graph 展示付款人、收款人和共享属性之间的关系，支持拖拽、缩放、漫游和高亮联动。</p>
-      </div>
+    <div class="panel-head topology-head">
+      <h3 class="section-title-only">关系拓扑</h3>
       <span :class="['status-pill', `tone-${overallTone}`]">{{ overallLabel }}</span>
     </div>
 
@@ -712,6 +708,21 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.topology-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.section-title-only {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #12202f;
+}
+
 .topology-panel {
   border-radius: 24px;
   padding: 20px;

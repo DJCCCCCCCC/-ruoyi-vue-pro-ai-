@@ -1,9 +1,10 @@
 import axios from 'axios'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:48080'
+const configuredBase = import.meta.env.VITE_API_BASE_URL
+const apiBase = configuredBase ? `${configuredBase}/admin-api` : '/admin-api'
 
 export const request = axios.create({
-  baseURL: `${baseURL}/admin-api`,
+  baseURL: apiBase,
   timeout: 90000,
   headers: {
     'Content-Type': 'application/json'

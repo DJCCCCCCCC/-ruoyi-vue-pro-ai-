@@ -1,19 +1,13 @@
 <template>
   <ContentWrap class="panel image-ocr-panel">
     <div class="panel-head">
-      <div>
-        <p class="panel-kicker">Image &amp; OCR</p>
-        <h3>图片内容分析</h3>
-        <p class="panel-desc">
-          专项展示 OCR 全文与分图结果；可上传截图单独跑 OCR，并选用大模型生成「图中文字含义与潜在风险」说明（与完整支付评估接口独立）。
-        </p>
-      </div>
+      <h3 class="section-title-only">图片 OCR</h3>
     </div>
 
     <div class="image-ocr-grid">
       <article class="image-ocr-card standalone-card">
-        <h4>上传图片 · 专项分析</h4>
-        <p class="hint">支持多张；单次最多 5 张（与后端配置一致）。需配置 Gitee OCR 与 DeepSeek 方可分别获得识别与解读。</p>
+        <h4>上传分析</h4>
+        <p class="hint">最多 5 张；需配置 OCR 与 LLM。</p>
         <el-upload
           drag
           multiple
@@ -217,6 +211,13 @@ const clearStandalone = () => {
 </script>
 
 <style scoped lang="scss">
+.section-title-only {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #12202f;
+}
+
 .image-ocr-panel {
   margin-bottom: 16px;
 }
