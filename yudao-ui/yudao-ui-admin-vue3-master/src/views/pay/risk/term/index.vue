@@ -18,7 +18,7 @@
       <el-form-item label="来源" prop="sourceType">
         <el-select v-model="queryParams.sourceType" class="!w-160px" clearable placeholder="全部">
           <el-option label="人工录入" value="MANUAL" />
-          <el-option label="评估自动" value="AUTO_ASSESS" />
+          <el-option label="聊天自动" value="AUTO_ASSESS" />
         </el-select>
       </el-form-item>
       <el-form-item label="状态" prop="status">

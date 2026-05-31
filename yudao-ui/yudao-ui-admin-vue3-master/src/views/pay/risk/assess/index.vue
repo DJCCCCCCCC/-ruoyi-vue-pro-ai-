@@ -134,7 +134,7 @@
         <div class="panel-head new-terms-head">
           <div>
             <h3>今日新增风险词</h3>
-            <p>来自风险词库（首次出现时间为今日）；点击穿透关联工单。可在「风险词库」页人工维护。</p>
+            <p>来自骗子聊天记录（对方消息 / detectedSignals）；点击穿透关联工单。可在「风险词库」页人工维护。</p>
           </div>
           <div class="new-terms-actions">
             <el-button type="primary" link @click="goRiskTermLib">词库管理</el-button>

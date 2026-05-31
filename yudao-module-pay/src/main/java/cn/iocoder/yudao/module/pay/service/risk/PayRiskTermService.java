@@ -22,9 +22,9 @@ public interface PayRiskTermService {
     PageResult<PayRiskTermDO> getTermPage(PayRiskTermPageReqVO pageReqVO);
 
     /**
-     * 评估落库后同步风险因子至词库（自动建档 + 命中关联）。
+     * 评估落库后从聊天记录提取话术并同步至词库（自动建档 + 命中关联）。
      */
-    void syncFactorsFromAssess(List<String> factors, Long recordId);
+    void syncChatTermsFromAssess(String paymentDataJson, Long recordId);
 
     /**
      * 今日首次进入词库的风险词（first_seen_time 在今日）。

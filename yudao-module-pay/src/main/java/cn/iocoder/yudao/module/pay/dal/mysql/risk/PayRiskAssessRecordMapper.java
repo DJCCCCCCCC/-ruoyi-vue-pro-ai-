@@ -43,21 +43,21 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
     int deleteAllPhysically();
 
     /**
-     * 仅扫描今日之前记录的命中因子，用于判断「今日新增」风险词
+     * 仅扫描今日之前记录的入参 JSON，用于判断「今日新增」聊天话术风险词
      */
-    default List<PayRiskAssessRecordDO> selectRiskFactorsJsonBefore(LocalDateTime deadlineExclusive) {
+    default List<PayRiskAssessRecordDO> selectPaymentDataJsonBefore(LocalDateTime deadlineExclusive) {
         return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
-                .select(PayRiskAssessRecordDO::getRiskFactorsJson)
+                .select(PayRiskAssessRecordDO::getPaymentDataJson)
                 .lt(PayRiskAssessRecordDO::getCreateTime, deadlineExclusive));
     }
 
     /**
-     * 今日内的记录 id + 风险因子（轻量，用于「今日新增风险词」聚合）
+     * 今日内的记录 id + 入参 JSON（轻量，用于「今日新增风险词」聚合）
      */
-    default List<PayRiskAssessRecordDO> selectIdAndRiskFactorsBetween(LocalDateTime startInclusive,
-                                                                       LocalDateTime endExclusive) {
+    default List<PayRiskAssessRecordDO> selectIdAndPaymentDataBetween(LocalDateTime startInclusive,
+                                                                      LocalDateTime endExclusive) {
         return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
-                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getRiskFactorsJson)
+                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getPaymentDataJson)
                 .ge(PayRiskAssessRecordDO::getCreateTime, startInclusive)
                 .lt(PayRiskAssessRecordDO::getCreateTime, endExclusive)
                 .orderByDesc(PayRiskAssessRecordDO::getId));
@@ -72,11 +72,11 @@ public interface PayRiskAssessRecordMapper extends BaseMapperX<PayRiskAssessReco
                 .orderByDesc(PayRiskAssessRecordDO::getId));
     }
 
-    default List<PayRiskAssessRecordDO> selectRecentRiskFactors(int limit) {
+    default List<PayRiskAssessRecordDO> selectRecentPaymentData(int limit) {
         int safeLimit = limit <= 0 ? 10 : Math.min(limit, 100);
         return selectList(new LambdaQueryWrapperX<PayRiskAssessRecordDO>()
-                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getRiskFactorsJson)
-                .isNotNull(PayRiskAssessRecordDO::getRiskFactorsJson)
+                .select(PayRiskAssessRecordDO::getId, PayRiskAssessRecordDO::getPaymentDataJson)
+                .isNotNull(PayRiskAssessRecordDO::getPaymentDataJson)
                 .orderByDesc(PayRiskAssessRecordDO::getId)
                 .last("LIMIT " + safeLimit));
     }

@@ -30,6 +30,7 @@ import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskDecisionResult;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskImageOcrEnrichOutcome;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskChatTermExtractor;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAdvancedAnalysisBuilder;
@@ -794,8 +795,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
                             : PayRiskReviewStatusConstants.NOT_REQUIRED);
                 }
                 payRiskAssessRecordMapper.updateById(update);
-                payRiskTermService.syncFactorsFromAssess(snapshot.getRiskFactors(), recordId);
-                log.info("[submitAgentReflectionAsync] Agentic 反思流已异步回写并同步风险词库，recordId={}", recordId);
+                log.info("[submitAgentReflectionAsync] Agentic 反思流已异步回写，recordId={}", recordId);
             } catch (Exception ex) {
                 log.warn("[submitAgentReflectionAsync] Agentic 反思流异步回写失败，recordId={}, error={}",
                         recordId, ex.getMessage(), ex);
@@ -863,7 +863,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         try {
             payRiskAssessRecordMapper.insert(record);
             if (record.getId() != null) {
-                payRiskTermService.syncFactorsFromAssess(respVO.getRiskFactors(), record.getId());
+                payRiskTermService.syncChatTermsFromAssess(record.getPaymentDataJson(), record.getId());
             }
             return record;
         } catch (Exception ex) {
@@ -1240,7 +1240,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             itemMap.put(termRow.getTerm(), vo);
         });
 
-        // 兜底：直接从评估记录 riskFactorsJson 回算“今日新增”。避免词库同步失败、异步回写或时间字段异常导致驾驶舱为空。
+        // 兜底：直接从评估记录 paymentData 聊天记录回算「今日新增」。避免词库同步失败或时间字段异常导致驾驶舱为空。
         Map<String, LinkedHashSet<Long>> recordComputed = computeTodayNewTermToRecordIds(range[0], range[1]);
         mergeComputedTodayNewTerms(itemMap, recordComputed);
 
@@ -1251,7 +1251,7 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
             mergeComputedTodayNewTerms(itemMap, rollingComputed);
         }
 
-        // 最后兜底：展示最近评估记录中的风险因子。这样即使“新增”判定被历史记录抵消，也不会让驾驶舱空白。
+        // 最后兜底：展示最近评估记录中的聊天话术。这样即使「新增」判定被历史记录抵消，也不会让驾驶舱空白。
         if (itemMap.isEmpty()) {
             mergeComputedTodayNewTerms(itemMap, computeRecentRiskTermToRecordIds());
         }
@@ -1339,18 +1339,18 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
     private Map<String, LinkedHashSet<Long>> computeTodayNewTermToRecordIds(LocalDateTime dayStartInclusive,
                                                                             LocalDateTime dayEndExclusive) {
         Set<String> historical = new HashSet<>();
-        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectRiskFactorsJsonBefore(dayStartInclusive)) {
-            historical.addAll(parseRiskFactorStrings(row.getRiskFactorsJson()));
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectPaymentDataJsonBefore(dayStartInclusive)) {
+            historical.addAll(extractChatTermsFromPaymentData(row.getPaymentDataJson()));
         }
         Map<String, LinkedHashSet<Long>> termToIds = new LinkedHashMap<>();
-        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectIdAndRiskFactorsBetween(dayStartInclusive, dayEndExclusive)) {
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectIdAndPaymentDataBetween(dayStartInclusive, dayEndExclusive)) {
             Long id = row.getId();
             if (id == null) {
                 continue;
             }
-            for (String factor : parseRiskFactorStrings(row.getRiskFactorsJson())) {
-                if (!historical.contains(factor)) {
-                    termToIds.computeIfAbsent(factor, k -> new LinkedHashSet<>()).add(id);
+            for (String term : extractChatTermsFromPaymentData(row.getPaymentDataJson())) {
+                if (!historical.contains(term)) {
+                    termToIds.computeIfAbsent(term, k -> new LinkedHashSet<>()).add(id);
                 }
             }
         }
@@ -1359,13 +1359,13 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
 
     private Map<String, LinkedHashSet<Long>> computeRecentRiskTermToRecordIds() {
         Map<String, LinkedHashSet<Long>> termToIds = new LinkedHashMap<>();
-        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectRecentRiskFactors(10)) {
+        for (PayRiskAssessRecordDO row : payRiskAssessRecordMapper.selectRecentPaymentData(10)) {
             Long id = row.getId();
             if (id == null) {
                 continue;
             }
-            for (String factor : parseRiskFactorStrings(row.getRiskFactorsJson())) {
-                termToIds.computeIfAbsent(factor, k -> new LinkedHashSet<>()).add(id);
+            for (String term : extractChatTermsFromPaymentData(row.getPaymentDataJson())) {
+                termToIds.computeIfAbsent(term, k -> new LinkedHashSet<>()).add(id);
             }
         }
         return termToIds;
@@ -1375,30 +1375,8 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         return raw == null ? "" : raw.trim();
     }
 
-    private static List<String> parseRiskFactorStrings(String json) {
-        if (StrUtil.isBlank(json)) {
-            return Collections.emptyList();
-        }
-        try {
-            List<String> arr = JsonUtils.parseArray(json, String.class);
-            if (arr == null || arr.isEmpty()) {
-                return Collections.emptyList();
-            }
-            List<String> out = new ArrayList<>();
-            for (String s : arr) {
-                if (s == null) {
-                    continue;
-                }
-                String t = s.trim();
-                if (t.isEmpty() || t.length() > MAX_RISK_TERM_LEN) {
-                    continue;
-                }
-                out.add(t);
-            }
-            return out;
-        } catch (Exception ex) {
-            return Collections.emptyList();
-        }
+    private static List<String> extractChatTermsFromPaymentData(String paymentDataJson) {
+        return PayRiskChatTermExtractor.extractTerms(paymentDataJson);
     }
 
     private static String buildConversationSummaryForPaymentData(String paymentDataJson) {

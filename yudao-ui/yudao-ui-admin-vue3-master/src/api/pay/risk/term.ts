@@ -61,5 +61,5 @@ export const TERM_CATEGORIES = [
 
 export const TERM_SOURCE_LABEL: Record<string, string> = {
   MANUAL: '人工录入',
-  AUTO_ASSESS: '评估自动'
+  AUTO_ASSESS: '聊天自动'
 }

@@ -1,7 +1,7 @@
 -- 支付风险词库
 CREATE TABLE IF NOT EXISTS `pay_risk_term` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '编号',
-  `term` varchar(256) NOT NULL COMMENT '风险词（与评估 riskFactors 文案一致）',
+  `term` varchar(256) NOT NULL COMMENT '风险词（来自聊天记录中的诈骗话术片段）',
   `category` varchar(64) DEFAULT 'OTHER' COMMENT '分类：FRAUD_SCRIPT/LINK/BEHAVIOR/PAYMENT/OTHER',
   `status` tinyint NOT NULL DEFAULT 0 COMMENT '状态：0 启用 1 禁用',
   `description` varchar(512) DEFAULT NULL COMMENT '说明',

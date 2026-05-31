@@ -2,7 +2,7 @@
   <Dialog v-model="dialogVisible" :title="dialogTitle" width="520px">
     <el-form ref="formRef" :model="formData" :rules="formRules" label-width="88px">
       <el-form-item label="风险词" prop="term">
-        <el-input v-model="formData.term" placeholder="与评估结果 riskFactors 文案保持一致" maxlength="256" show-word-limit />
+        <el-input v-model="formData.term" placeholder="骗子聊天记录中的典型话术，如「马上转账到安全账户」" maxlength="256" show-word-limit />
       </el-form-item>
       <el-form-item label="分类" prop="category">
         <el-select v-model="formData.category" class="!w-full" placeholder="请选择分类">
