@@ -7,14 +7,17 @@ import cn.iocoder.yudao.module.pay.enums.ErrorCodeConstants;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAgentReflection;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskAssessAiResponse;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskPoliceReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAgentReflectionPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportPromptBuilder;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPoliceReportPromptBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPromptBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,8 +51,8 @@ public class DeepSeekClient {
     @Value("${yudao.pay.risk-assess.qwen.report-max-tokens:2048}")
     private Integer reportMaxTokens;
 
-    /** Agentic 反思流：单个 Agent 的 JSON 输出长度 */
-    @Value("${yudao.pay.risk-assess.qwen.agent-max-tokens:900}")
+    /** Agentic 反思流：单个 Agent 的 JSON 输出长度（质疑 Agent 的 issues 较长，900 易截断） */
+    @Value("${yudao.pay.risk-assess.qwen.agent-max-tokens:1536}")
     private Integer agentMaxTokens;
 
     @Value("${yudao.pay.risk-assess.http-timeout-millis:20000}")
@@ -58,6 +61,10 @@ public class DeepSeekClient {
     /** 图片 OCR 专项解读：纯文本输出，非 JSON */
     @Value("${yudao.pay.risk-assess.qwen.image-ocr-narrative-max-tokens:640}")
     private Integer imageOcrNarrativeMaxTokens;
+
+    /** 事后报警协助报告：含时间线、线索、口述稿等结构化字段 */
+    @Value("${yudao.pay.risk-assess.qwen.police-report-max-tokens:3072}")
+    private Integer policeReportMaxTokens;
 
     public PayRiskAssessAiResponse assess(String paymentMaskedJson, String ipInfoMaskedJson) {
         if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
@@ -128,6 +135,30 @@ public class DeepSeekClient {
     /**
      * 根据 OCR 合并文本，用自然语言概括图中文字可能涉及的支付/诈骗场景与风险点（不返回 JSON）。
      */
+    public PayRiskPoliceReport generatePoliceReport(String contextJson) {
+        if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_DEEPSEEK_API_KEY_MISSING);
+        }
+
+        String userPrompt = PayRiskPoliceReportPromptBuilder.buildUserPrompt(contextJson);
+        String url = baseUrl + "/chat/completions";
+
+        int cap = policeReportMaxTokens != null && policeReportMaxTokens > 0 ? policeReportMaxTokens : maxTokens;
+        Map<String, Object> reqBody = buildRequestBody(userPrompt, PayRiskPoliceReportPromptBuilder.SYSTEM_PROMPT, true, cap);
+        try {
+            return doCall(url, reqBody, PayRiskPoliceReport.class);
+        } catch (Exception firstEx) {
+            log.warn("[DeepSeekClient][generatePoliceReport] 第一次调用失败，重试(不含 response_format)：{}", firstEx.getMessage());
+            reqBody = buildRequestBody(userPrompt, PayRiskPoliceReportPromptBuilder.SYSTEM_PROMPT, false, cap);
+            try {
+                return doCall(url, reqBody, PayRiskPoliceReport.class);
+            } catch (Exception secondEx) {
+                log.warn("[DeepSeekClient][generatePoliceReport] 解析失败，将由上层使用 FALLBACK 报告：{}", secondEx.getMessage());
+                return null;
+            }
+        }
+    }
+
     public String analyzeImageOcrNarrative(String ocrMergedText) {
         if (qwenApiKey == null || qwenApiKey.trim().isEmpty()) {
             return null;
@@ -247,6 +278,12 @@ public class DeepSeekClient {
                     throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
                 }
             }
+            if (result instanceof PayRiskPoliceReport) {
+                PayRiskPoliceReport policeReport = (PayRiskPoliceReport) result;
+                if (policeReport.getCaseSummary() == null || policeReport.getPrintableStatement() == null) {
+                    throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
+                }
+            }
             return result;
         } catch (Exception e) {
             log.error("[DeepSeekClient][doCall] 调用 Qwen 失败", e);
@@ -264,50 +301,99 @@ public class DeepSeekClient {
             int firstBrace = text.indexOf('{');
             int lastBrace = text.lastIndexOf('}');
             if (firstBrace >= 0 && lastBrace > firstBrace) {
-                return text.substring(firstBrace, lastBrace + 1);
+                text = text.substring(firstBrace, lastBrace + 1);
+            } else if (firstBrace >= 0) {
+                text = text.substring(firstBrace);
             }
         }
         int start = text.indexOf('{');
         if (start < 0) {
             return text;
         }
-        int end = text.lastIndexOf('}');
-        if (end > start) {
-            return text.substring(start, end + 1);
+        // 按括号深度提取完整 JSON；若因 max_tokens 截断则返回从 { 到末尾的片段供 repair 处理
+        int depth = 0;
+        boolean inString = false;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' && (i == 0 || text.charAt(i - 1) != '\\')) {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substring(start, i + 1);
+                }
+            }
         }
         return text.substring(start);
     }
 
     /**
-     * 先正常解析；失败时对截断 JSON 补全括号后再试（常见于 report-max-tokens 不足）。
+     * 静默 JSON 解析（不经过 JsonUtils.parseObject，避免预期内的重试路径刷 ERROR 日志）。
+     */
+    private <T> T parseJsonQuiet(String jsonText, Class<T> resultType) throws IOException {
+        return JsonUtils.getObjectMapper().readValue(jsonText, resultType);
+    }
+
+    /**
+     * 先正常解析；失败时对截断 JSON 补全括号后再试（常见于 max_tokens 不足导致截断）。
+     * 截断修复属于预期兜底，仅打 WARN；全部失败时由 doCall 统一打 ERROR。
      */
     private <T> T parseJsonLenient(String jsonText, Class<T> resultType) {
         if (jsonText == null || jsonText.trim().isEmpty()) {
             throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_AI_RESPONSE_INVALID);
         }
         try {
-            return JsonUtils.parseObject(jsonText, resultType);
+            return parseJsonQuiet(jsonText, resultType);
         } catch (Exception first) {
             String repaired = repairTruncatedJson(jsonText);
-            if (repaired.equals(jsonText)) {
-                throw first;
+            if (!repaired.equals(jsonText)) {
+                log.warn("[DeepSeekClient] 模型 JSON 可能被截断，补全括号后重试，type={}", resultType.getSimpleName());
+                try {
+                    return parseJsonQuiet(repaired, resultType);
+                } catch (Exception second) {
+                    first = second;
+                }
             }
-            log.warn("[DeepSeekClient] JSON 解析失败，尝试补全截断括号后重试，type={}", resultType.getSimpleName());
-            return JsonUtils.parseObject(repaired, resultType);
+            String salvaged = salvageTruncatedJson(jsonText);
+            if (!salvaged.equals(jsonText) && !salvaged.equals(repaired)) {
+                log.warn("[DeepSeekClient] 补全后仍无法解析，丢弃末尾不完整数组元素后重试，type={}",
+                        resultType.getSimpleName());
+                try {
+                    return parseJsonQuiet(salvaged, resultType);
+                } catch (Exception third) {
+                    first = third;
+                }
+            }
+            if (first instanceof RuntimeException) {
+                throw (RuntimeException) first;
+            }
+            throw new RuntimeException(first);
         }
     }
 
     /**
-     * 为未闭合的 {、[ 补全结束符（不处理字符串中间的截断）。
+     * 修复因 max_tokens 截断导致的 JSON：闭合未结束字符串、去掉不完整数组元素、补全括号。
      */
     private static String repairTruncatedJson(String json) {
         if (json == null) {
             return "";
         }
         String s = json.trim();
-        while (s.endsWith(",")) {
-            s = s.substring(0, s.length() - 1).trim();
+        if (endsInsideString(s)) {
+            s = s + "\"";
         }
+        s = trimTrailingCommas(s);
+        s = dropIncompleteTrailingArrayElement(s);
+        s = trimTrailingColon(s);
+        s = trimTrailingCommas(s);
+
         int braceDepth = 0;
         int bracketDepth = 0;
         boolean inString = false;
@@ -341,6 +427,89 @@ public class DeepSeekClient {
             sb.append('}');
         }
         return sb.toString();
+    }
+
+    /**
+     * 更激进地 salvage：丢弃最后一个不完整的数组元素后再补全括号。
+     */
+    private static String salvageTruncatedJson(String json) {
+        if (json == null) {
+            return "";
+        }
+        String s = json.trim();
+        s = dropIncompleteTrailingArrayElement(s);
+        if (endsInsideString(s)) {
+            s = s + "\"";
+        }
+        s = trimTrailingCommas(s);
+        s = trimTrailingColon(s);
+        return repairTruncatedJson(s);
+    }
+
+    private static boolean endsInsideString(String s) {
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == '"' && (i == 0 || s.charAt(i - 1) != '\\')) {
+                inString = !inString;
+            }
+        }
+        return inString;
+    }
+
+    private static String trimTrailingCommas(String s) {
+        String result = s;
+        while (result.endsWith(",")) {
+            result = result.substring(0, result.length() - 1).trim();
+        }
+        return result;
+    }
+
+    private static String trimTrailingColon(String s) {
+        String result = s.trim();
+        if (result.endsWith(":")) {
+            return result.substring(0, result.length() - 1).trim() + ": null";
+        }
+        return result;
+    }
+
+    /**
+     * 若末尾存在未闭合的 {@code {...} 数组元素（常见于 issues 列表被截断），丢弃该元素。
+     */
+    private static String dropIncompleteTrailingArrayElement(String s) {
+        int lastComplete = s.lastIndexOf("},");
+        if (lastComplete < 0) {
+            int alt = s.lastIndexOf("}\n");
+            if (alt >= 0) {
+                lastComplete = alt;
+            }
+        }
+        if (lastComplete < 0) {
+            return s;
+        }
+        String tail = s.substring(lastComplete + 2).trim();
+        if (tail.isEmpty()) {
+            return s;
+        }
+        if (tail.startsWith("{") && countCharOutsideStrings(tail, '{') > countCharOutsideStrings(tail, '}')) {
+            return trimTrailingCommas(s.substring(0, lastComplete + 1));
+        }
+        return s;
+    }
+
+    private static int countCharOutsideStrings(String s, char target) {
+        int count = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' && (i == 0 || s.charAt(i - 1) != '\\')) {
+                inString = !inString;
+                continue;
+            }
+            if (!inString && c == target) {
+                count++;
+            }
+        }
+        return count;
     }
 }
 

@@ -7,6 +7,8 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordP
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskSpeechTranscribeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
@@ -54,6 +56,11 @@ public interface PayRiskAssessService {
      * 语音转文字（Gitee GLM-ASR 等 OpenAI 兼容 /audio/transcriptions 接口）。
      */
     PayRiskSpeechTranscribeRespVO transcribeSpeech(MultipartFile file);
+
+    /**
+     * 事后报警协助：基于聊天记录与风控上下文，生成面向民警的结构化案情摘要与线索报告。
+     */
+    PayRiskPoliceReportRespVO generatePoliceReport(@Valid PayRiskPoliceReportReqVO reqVO);
 
 }
 

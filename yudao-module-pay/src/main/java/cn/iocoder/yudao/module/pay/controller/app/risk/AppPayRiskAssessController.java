@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.pay.controller.app.risk;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.pay.controller.app.risk.vo.AppPayRiskAssessReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportRespVO;
 import cn.iocoder.yudao.module.pay.service.risk.PayRiskAssessService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -38,5 +40,13 @@ public class AppPayRiskAssessController {
         Map<String, Object> result = payRiskAssessService.assessAndReturnMap(reqVO);
         log.info("[assess] 支付风险评估完成，返回字段：{}", result.keySet());
         return success(result);
+    }
+
+    @PostMapping("/police-report")
+    @Operation(summary = "事后报警协助（基于聊天记录生成面向民警的结构化案情摘要）")
+    @PermitAll
+    public CommonResult<PayRiskPoliceReportRespVO> generatePoliceReport(
+            @RequestBody PayRiskPoliceReportReqVO reqVO) {
+        return success(payRiskAssessService.generatePoliceReport(reqVO));
     }
 }

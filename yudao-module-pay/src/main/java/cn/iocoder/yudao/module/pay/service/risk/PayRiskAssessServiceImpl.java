@@ -6,6 +6,8 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordP
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskSpeechTranscribeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTermRelatedTicketVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
@@ -32,6 +34,7 @@ import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskImageOcrEnrichOutco
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskCaseSimilarityAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskChatTermExtractor;
 import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskLlmAnalysisReport;
+import cn.iocoder.yudao.module.pay.service.risk.model.PayRiskPoliceReport;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAdvancedAnalysisBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskBehaviorMockDataGenerator;
@@ -39,6 +42,7 @@ import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskDesensitizer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLinkAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskLlmReportFallbackBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskAgentReflectionPromptBuilder;
+import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPoliceReportFallbackBuilder;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskPaymentImageOcrEnricher;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskRelationTopologyAnalyzer;
 import cn.iocoder.yudao.module.pay.service.risk.util.PayRiskWhoisAnalyzer;
@@ -1501,6 +1505,99 @@ public class PayRiskAssessServiceImpl implements PayRiskAssessService {
         resp.setText(text);
         resp.setModel(payRiskGiteeAsrClient.getModel());
         return resp;
+    }
+
+    @Override
+    public PayRiskPoliceReportRespVO generatePoliceReport(@Valid PayRiskPoliceReportReqVO reqVO) {
+        PayRiskImageOcrEnrichOutcome ocrOutcome = PayRiskPaymentImageOcrEnricher.enrichWithOutcome(
+                reqVO.getPaymentData(),
+                payRiskGiteeOcrClient,
+                ocrMaxPayloadChars,
+                ocrMaxImagesPerRequest,
+                ocrStripImageDataAfterOcr);
+        JsonNode paymentData = ocrOutcome.getPaymentData();
+
+        String ip = reqVO.getIp();
+        if (ip == null || ip.trim().isEmpty()) {
+            ip = PayRiskDesensitizer.extractFirstIp(paymentData);
+        }
+        if (ip == null || ip.trim().isEmpty()) {
+            throw exception(ErrorCodeConstants.PAY_RISK_ASSESS_IP_MISSING);
+        }
+
+        JsonNode ipInfo = fetchIpInfoWithCache(ip);
+        JsonNode paymentMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(paymentData);
+        JsonNode ipInfoMaskedJsonNode = PayRiskDesensitizer.desensitizeForPrompt(ipInfo);
+
+        CompletableFuture<PayRiskLinkAnalyzer.LinkRiskAssessment> linkFuture = CompletableFuture.supplyAsync(
+                () -> PayRiskLinkAnalyzer.analyze(paymentData), riskAssessExecutor);
+        CompletableFuture<PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment> topoFuture =
+                CompletableFuture.supplyAsync(
+                        () -> PayRiskRelationTopologyAnalyzer.analyze(paymentData), riskAssessExecutor);
+        CompletableFuture.allOf(linkFuture, topoFuture).join();
+
+        PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment topologyRiskAssessment = joinCf(topoFuture);
+        joinCf(linkFuture);
+
+        ObjectNode contextNode = buildPoliceReportContext(reqVO, paymentMaskedJsonNode, ipInfoMaskedJsonNode,
+                topologyRiskAssessment, ocrOutcome);
+
+        PayRiskPoliceReport report;
+        try {
+            report = deepSeekClient.generatePoliceReport(JsonUtils.toJsonString(contextNode));
+            if (report == null) {
+                log.warn("[generatePoliceReport] LLM 报告为空或解析失败，使用 FALLBACK 报告");
+                report = PayRiskPoliceReportFallbackBuilder.build(contextNode, topologyRiskAssessment.getTopology());
+            } else if (report.getMode() == null || report.getMode().trim().isEmpty()) {
+                report.setMode("LLM");
+            }
+        } catch (Exception ex) {
+            log.warn("[generatePoliceReport] LLM 报警协助报告失败，使用兜底报告：{}", ex.getMessage());
+            report = PayRiskPoliceReportFallbackBuilder.build(contextNode, topologyRiskAssessment.getTopology());
+        }
+
+        PayRiskPoliceReportRespVO respVO = new PayRiskPoliceReportRespVO();
+        respVO.setReport(report);
+        respVO.setTopologyInfo(topologyRiskAssessment.getTopology());
+        respVO.setGeneratedAt(LocalDateTime.now().toString());
+        return respVO;
+    }
+
+    private ObjectNode buildPoliceReportContext(PayRiskPoliceReportReqVO reqVO,
+                                                JsonNode paymentMaskedJsonNode,
+                                                JsonNode ipInfoMaskedJsonNode,
+                                                PayRiskRelationTopologyAnalyzer.TopologyRiskAssessment topologyRiskAssessment,
+                                                PayRiskImageOcrEnrichOutcome ocrOutcome) {
+        ObjectNode root = JsonUtils.getObjectMapper().createObjectNode();
+        if (paymentMaskedJsonNode != null && !paymentMaskedJsonNode.isNull()) {
+            root.set("paymentData", paymentMaskedJsonNode);
+        }
+        if (ipInfoMaskedJsonNode != null && !ipInfoMaskedJsonNode.isNull()) {
+            root.set("ipInfo", ipInfoMaskedJsonNode);
+        }
+        if (topologyRiskAssessment != null && topologyRiskAssessment.getTopology() != null) {
+            root.set("topology", JsonUtils.parseTree(JsonUtils.toJsonString(topologyRiskAssessment.getTopology())));
+        }
+        if (reqVO.getPriorAssessSnapshot() != null && !reqVO.getPriorAssessSnapshot().isNull()) {
+            root.set("priorAssessSnapshot", reqVO.getPriorAssessSnapshot());
+        }
+        if (reqVO.getConfirmedTransferred() != null) {
+            root.put("confirmedTransferred", reqVO.getConfirmedTransferred());
+        }
+        if (StrUtil.isNotBlank(reqVO.getAdditionalVictimNotes())) {
+            root.put("additionalVictimNotes", reqVO.getAdditionalVictimNotes().trim());
+        }
+        if (ocrOutcome != null && ocrOutcome.getEmbeddedImageCount() > 0) {
+            root.put("embeddedImageCount", ocrOutcome.getEmbeddedImageCount());
+            if (StrUtil.isNotBlank(ocrOutcome.getImageOcrSummary())) {
+                root.put("imageOcrSummary", ocrOutcome.getImageOcrSummary());
+            }
+            if (StrUtil.isNotBlank(ocrOutcome.getImageOcrTextPreview())) {
+                root.put("imageOcrTextPreview", truncateForPrompt(ocrOutcome.getImageOcrTextPreview(), 4000));
+            }
+        }
+        root.put("reportPurpose", "POST_FRAUD_POLICE_ASSIST");
+        return root;
     }
 
     private static class BehaviorAssessBundle {

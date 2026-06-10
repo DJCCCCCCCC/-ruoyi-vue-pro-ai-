@@ -146,6 +146,72 @@ export interface PayRiskAssessRespVO {
   imageOcrSummary?: string
   /** OCR 正文预览（截断） */
   imageOcrTextPreview?: string
+  decision?: {
+    action?: string
+    reasons?: string[]
+  }
+}
+
+export interface PayRiskPoliceReportTimelineItem {
+  time?: string
+  phase?: string
+  description?: string
+  role?: string
+}
+
+export interface PayRiskPoliceReportTransferSummary {
+  amounts?: string[]
+  channels?: string[]
+  payeeAccounts?: string[]
+  totalLossEstimate?: string
+  transferTimeHint?: string
+}
+
+export interface PayRiskPoliceReportSuspectClue {
+  category?: string
+  value?: string
+  source?: string
+  note?: string
+}
+
+export interface PayRiskPoliceReportFundFlow {
+  summary?: string
+  inferredPaths?: string[]
+  freezeTargets?: string[]
+  limitations?: string[]
+}
+
+export interface PayRiskPoliceReport {
+  mode?: string
+  reportTitle?: string
+  caseSummary?: string
+  fraudType?: string
+  fraudModusOperandi?: string
+  urgencyLevel?: string
+  timeline?: PayRiskPoliceReportTimelineItem[]
+  transferSummary?: PayRiskPoliceReportTransferSummary
+  suspectClues?: PayRiskPoliceReportSuspectClue[]
+  fundFlowAnalysis?: PayRiskPoliceReportFundFlow
+  evidenceInventory?: string[]
+  systemWarnings?: string[]
+  policeChecklist?: string[]
+  victimActionItems?: string[]
+  printableStatement?: string
+  disclaimer?: string
+}
+
+export interface PayRiskPoliceReportReqVO {
+  ip?: string
+  paymentData: Record<string, unknown>
+  confirmedTransferred?: boolean
+  additionalVictimNotes?: string
+  priorAssessSnapshot?: PayRiskAssessRespVO
+}
+
+export interface PayRiskPoliceReportRespVO {
+  report: PayRiskPoliceReport
+  topologyInfo?: PayRiskRelationTopology
+  generatedAt?: string
 }
 
 /** 单条聊天里的图片（压缩后为 JPEG data URL，供后端 OCR 扫描） */

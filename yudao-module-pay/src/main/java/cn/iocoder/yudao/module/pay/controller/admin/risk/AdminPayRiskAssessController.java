@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessRecordR
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskAssessReviewReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskImageOcrAnalyzeRespVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportReqVO;
+import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskPoliceReportRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskSpeechTranscribeRespVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailReqVO;
 import cn.iocoder.yudao.module.pay.controller.admin.risk.vo.PayRiskTodayNewTermDetailRespVO;
@@ -133,5 +135,13 @@ public class AdminPayRiskAssessController {
     public CommonResult<Boolean> reviewRecord(@Valid @RequestBody PayRiskAssessReviewReqVO reqVO) {
         payRiskAssessService.reviewRiskAssessRecord(reqVO);
         return success(true);
+    }
+
+    @PostMapping("/police-report")
+    @Operation(summary = "事后报警协助（基于聊天记录生成面向民警的结构化案情摘要）")
+    @PermitAll
+    public CommonResult<PayRiskPoliceReportRespVO> generatePoliceReport(
+            @Valid @RequestBody PayRiskPoliceReportReqVO reqVO) {
+        return success(payRiskAssessService.generatePoliceReport(reqVO));
     }
 }

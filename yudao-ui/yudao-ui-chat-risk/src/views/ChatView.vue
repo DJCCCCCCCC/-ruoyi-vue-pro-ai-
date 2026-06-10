@@ -15,6 +15,15 @@
         </div>
         <div class="header-actions">
           <button
+            v-if="getConversationMessages().length > 0"
+            type="button"
+            class="header-btn header-btn-police"
+            :disabled="policeLoading"
+            @click="openPoliceDialog"
+          >
+            {{ policeLoading ? '生成中…' : '报警协助' }}
+          </button>
+          <button
             v-if="latestRiskResult"
             type="button"
             class="header-btn header-btn-secondary"
@@ -127,10 +136,96 @@
           <RiskResultCompact :risk-data="latestRiskResult" />
 
           <div class="risk-dialog-actions">
+            <button
+              type="button"
+              class="risk-dialog-btn risk-dialog-btn-police"
+              @click="openPoliceDialogFromRisk"
+            >
+              我已转账被骗
+            </button>
             <button type="button" class="risk-dialog-btn risk-dialog-btn-secondary" @click="closeRiskDialog">
               我知道了
             </button>
           </div>
+        </section>
+      </div>
+    </transition>
+
+    <transition name="risk-dialog-fade">
+      <div
+        v-if="policeDialogVisible"
+        class="risk-dialog-mask police-dialog-mask"
+        @click.self="closePoliceDialog"
+      >
+        <section
+          class="risk-dialog police-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="police-dialog-title"
+        >
+          <div class="risk-dialog-header">
+            <div>
+              <p class="risk-dialog-eyebrow police-eyebrow">事后报警协助</p>
+              <h3 id="police-dialog-title">生成面向民警的案情摘要</h3>
+              <p class="risk-dialog-summary">
+                若您未听从系统提示仍已转账，AI 将根据聊天记录、风控线索整理口述稿、嫌疑人线索与资金去向推测，供报警时使用。
+              </p>
+            </div>
+            <button
+              type="button"
+              class="risk-dialog-close"
+              aria-label="关闭报警协助"
+              @click="closePoliceDialog"
+            >
+              ×
+            </button>
+          </div>
+
+          <div v-if="!policeReportResult" class="police-form">
+            <label class="police-check">
+              <input v-model="policeConfirmedTransferred" type="checkbox" :disabled="policeLoading" />
+              <span>我已确认发生转账 / 已被骗（系统将按紧急案情处理）</span>
+            </label>
+            <label class="police-field">
+              <span>补充说明（选填）</span>
+              <textarea
+                v-model="policeAdditionalNotes"
+                rows="3"
+                placeholder="例如：转账时间、金额、银行/支付宝/微信、对方收款账号、是否还能联系对方…"
+                :disabled="policeLoading"
+              ></textarea>
+            </label>
+            <p v-if="policeError" class="police-error">{{ policeError }}</p>
+            <div class="risk-dialog-actions police-form-actions">
+              <button
+                type="button"
+                class="risk-dialog-btn risk-dialog-btn-secondary"
+                :disabled="policeLoading || getConversationMessages().length === 0"
+                @click="handleGeneratePoliceReport"
+              >
+                {{ policeLoading ? 'AI 整理中…' : '生成报警材料' }}
+              </button>
+            </div>
+          </div>
+
+          <template v-else>
+            <PoliceReportPanel
+              :report="policeReportResult.report"
+              :generated-at="policeReportResult.generatedAt"
+              @copied="handlePoliceStatementCopied"
+            />
+            <div class="risk-dialog-actions police-result-actions">
+              <button type="button" class="risk-dialog-btn risk-dialog-btn-outline" @click="handlePrintPoliceReport">
+                打印
+              </button>
+              <button type="button" class="risk-dialog-btn risk-dialog-btn-outline" @click="resetPoliceReport">
+                重新生成
+              </button>
+              <button type="button" class="risk-dialog-btn risk-dialog-btn-secondary" @click="closePoliceDialog">
+                关闭
+              </button>
+            </div>
+          </template>
         </section>
       </div>
     </transition>
@@ -141,7 +236,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import ChatBubble from '@/components/ChatBubble.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import PoliceReportPanel from '@/components/PoliceReportPanel.vue'
 import RiskResultCompact from '@/components/RiskResultCompact.vue'
+import { usePoliceReport } from '@/composables/usePoliceReport'
 import { useRiskAssess } from '@/composables/useRiskAssess'
 import { riskPresets, type RiskPreset } from '@/constants/presets'
 import { useChatStore } from '@/stores/chat'
@@ -151,12 +248,15 @@ import type {
   ChatMessageVoice,
   ChatRole,
   PayRiskAssessRespVO,
+  PayRiskPoliceReportReqVO,
+  PayRiskPoliceReportRespVO,
   RiskLevel
 } from '@/types'
 import { fileToJpegDataUrl } from '@/utils/imageCompress'
 
 const chatStore = useChatStore()
 const { assess, error } = useRiskAssess()
+const { loading: policeLoading, error: policeError, generate: generatePoliceReportApi } = usePoliceReport()
 const messagesRef = ref<HTMLElement>()
 const draft = ref('')
 const draftSender = ref<Extract<ChatRole, 'self' | 'peer'>>('peer')
@@ -164,6 +264,10 @@ const lastSubmittedFingerprint = ref('')
 const sessionVersion = ref(0)
 const latestRiskResult = ref<PayRiskAssessRespVO | null>(null)
 const riskDialogVisible = ref(false)
+const policeDialogVisible = ref(false)
+const policeConfirmedTransferred = ref(false)
+const policeAdditionalNotes = ref('')
+const policeReportResult = ref<PayRiskPoliceReportRespVO | null>(null)
 const activePreset = ref<RiskPreset | null>(null)
 
 /** 选填：传给后端 LLM，用于个性化防诈话术（年龄段 / 个性 / 防诈了解程度） */
@@ -244,6 +348,64 @@ const openRiskDialog = () => {
 
 const closeRiskDialog = () => {
   riskDialogVisible.value = false
+}
+
+const openPoliceDialog = () => {
+  policeDialogVisible.value = true
+}
+
+const openPoliceDialogFromRisk = () => {
+  policeConfirmedTransferred.value = true
+  riskDialogVisible.value = false
+  policeDialogVisible.value = true
+}
+
+const closePoliceDialog = () => {
+  policeDialogVisible.value = false
+}
+
+const resetPoliceReport = () => {
+  policeReportResult.value = null
+}
+
+const buildPoliceReportPayload = (): PayRiskPoliceReportReqVO => {
+  const { ip, paymentData } = buildAnalysisPayload()
+  return {
+    ip,
+    paymentData,
+    confirmedTransferred: policeConfirmedTransferred.value,
+    additionalVictimNotes: policeAdditionalNotes.value.trim() || undefined,
+    priorAssessSnapshot: latestRiskResult.value || undefined
+  }
+}
+
+const handleGeneratePoliceReport = async () => {
+  if (getConversationMessages().length === 0) {
+    return
+  }
+  const result = await generatePoliceReportApi(buildPoliceReportPayload())
+  if (result) {
+    policeReportResult.value = result
+    chatStore.addMessage(
+      createMessage('system', '已生成报警协助材料，可向民警出示或打印口述稿与线索清单')
+    )
+    return
+  }
+  if (policeError.value) {
+    chatStore.addMessage(createMessage('system', policeError.value))
+  }
+}
+
+const handlePoliceStatementCopied = (text: string) => {
+  if (text) {
+    chatStore.addMessage(createMessage('system', '口述稿已复制到剪贴板，可粘贴到报案记录或发给亲友'))
+  } else {
+    chatStore.addMessage(createMessage('system', '复制失败，请手动选中口述稿复制'))
+  }
+}
+
+const handlePrintPoliceReport = () => {
+  window.print()
 }
 
 const latestResultButtonText = computed(() => {
@@ -619,6 +781,10 @@ const handleClear = () => {
     lastSubmittedFingerprint.value = ''
     latestRiskResult.value = null
     riskDialogVisible.value = false
+    policeDialogVisible.value = false
+    policeReportResult.value = null
+    policeConfirmedTransferred.value = false
+    policeAdditionalNotes.value = ''
     voiceTranscripts.value = []
     userAgeBand.value = ''
     userPersonality.value = ''
@@ -752,6 +918,16 @@ if (chatStore.messages.length === 0) {
   color: #991b1b;
 }
 
+.header-btn-police {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.header-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -883,6 +1059,8 @@ if (chatStore.messages.length === 0) {
   display: flex;
   justify-content: flex-end;
   margin-top: 18px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .risk-dialog-btn {
@@ -897,6 +1075,76 @@ if (chatStore.messages.length === 0) {
 .risk-dialog-btn-secondary {
   background: #111827;
   color: #fff;
+}
+
+.risk-dialog-btn-police {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.risk-dialog-btn-outline {
+  background: #fff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.police-dialog {
+  width: min(100%, 720px);
+  max-height: min(100vh - 32px, 90vh);
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+  border-color: rgba(59, 130, 246, 0.24);
+}
+
+.police-eyebrow {
+  color: #1d4ed8;
+}
+
+.police-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.police-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+  cursor: pointer;
+}
+
+.police-check input {
+  margin-top: 3px;
+}
+
+.police-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.police-field textarea {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.police-error {
+  margin: 0;
+  font-size: 13px;
+  color: #b91c1c;
+}
+
+.police-form-actions,
+.police-result-actions {
+  justify-content: flex-end;
 }
 
 .risk-dialog-fade-enter-active,

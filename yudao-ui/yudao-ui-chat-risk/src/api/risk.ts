@@ -1,5 +1,10 @@
 import { request } from '@/utils/request'
-import type { PayRiskAssessReqVO, PayRiskAssessRespVO } from '@/types'
+import type {
+  PayRiskAssessReqVO,
+  PayRiskAssessRespVO,
+  PayRiskPoliceReportReqVO,
+  PayRiskPoliceReportRespVO
+} from '@/types'
 
 export interface PayRiskSpeechTranscribeRespVO {
   text: string
@@ -8,6 +13,12 @@ export interface PayRiskSpeechTranscribeRespVO {
 
 export const assessPayRisk = async (data: PayRiskAssessReqVO): Promise<PayRiskAssessRespVO> => {
   return await request.post('/pay/risk/assess', data)
+}
+
+export const generatePoliceReport = async (
+  data: PayRiskPoliceReportReqVO
+): Promise<PayRiskPoliceReportRespVO> => {
+  return await request.post('/pay/risk/police-report', data, { timeout: 120000 })
 }
 
 export const transcribeSpeech = async (file: Blob, filename = 'recording.webm'): Promise<PayRiskSpeechTranscribeRespVO> => {

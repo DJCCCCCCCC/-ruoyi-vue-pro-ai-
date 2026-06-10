@@ -22,6 +22,7 @@ public class PayRiskAgentReflectionPromptBuilder {
             + "你的唯一任务是审查判定Agent的漏洞：证据不足、逻辑跳跃、替代解释、遗漏反证、事实幻觉。"
             + "不要重新写一份普通风险报告；必须逐项针对 assessor.coreClaims 找问题。"
             + "只能依据 evidenceList 和 assessor 输出，不能新增事实。"
+            + "issues 最多 4 条，每条 description 与 suggestedAdjustment 各不超过 80 字；优先覆盖前几条 coreClaims，务必保证 JSON 完整闭合。"
             + "只返回严格 JSON，不要输出 markdown。所有文本使用中文。";
 
     public static final String ARBITER_SYSTEM_PROMPT = "你是支付风控三阶段反思流中的【仲裁Agent】。"
@@ -51,7 +52,7 @@ public class PayRiskAgentReflectionPromptBuilder {
                 + reflectionContextJson
                 + "\n\n以下是判定Agent输出：\n"
                 + JsonUtils.toJsonString(assessor)
-                + "\n\n请输出质疑Agent JSON：\n"
+                + "\n\n请输出质疑Agent JSON（issues 最多 4 条，字段宜短，确保 JSON 完整）：\n"
                 + "{\n"
                 + "  \"overallChallengeStrength\": 0.0-1.0,\n"
                 + "  \"issues\": [{\"targetClaim\":\"...\",\"issueType\":\"INSUFFICIENT_EVIDENCE|LOGIC_GAP|ALTERNATIVE_EXPLANATION|MISSED_COUNTER_EVIDENCE|HALLUCINATION\",\"description\":\"...\",\"severity\":\"LOW|MEDIUM|HIGH\",\"suggestedAdjustment\":\"...\"}],\n"
